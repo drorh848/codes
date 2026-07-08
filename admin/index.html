@@ -90,6 +90,29 @@
             border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
         }
         .devices-empty { color: #7f8c8d; font-size: 11px; text-align: center; padding: 5px; }
+        .online-count {
+            text-align: center; font-size: 13px; font-weight: bold;
+            color: #2ecc71; margin-bottom: 6px;
+        }
+        .presence-dot {
+            display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+            background: #2ecc71; margin-left: 4px; vertical-align: middle;
+            box-shadow: 0 0 4px #2ecc71;
+        }
+        .presence-dot.off { background: #7f8c8d; box-shadow: none; }
+        .presence-text { color: #2ecc71; font-size: 10px; }
+        .presence-text.off { color: #7f8c8d; }
+        .small-btn {
+            background: #34495e; color: white; border: none;
+            border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+        }
+        .history-list { max-height: 45vh; overflow-y: auto; text-align: right; }
+        .history-item {
+            background: #f0f2f5; border-radius: 6px; padding: 7px 10px;
+            margin-bottom: 5px; font-size: 13px; color: #333;
+        }
+        .history-item b { color: #007bff; }
+        .history-item .live { color: #28a745; font-weight: bold; }
         .logout-btn {
             width: 100%; background: transparent; color: #95a5a6;
             border: 1px solid #34495e; border-radius: 4px; padding: 4px;
@@ -181,6 +204,7 @@
         <!-- ניהול מכשירים -->
         <div class="security-box">
             <p class="security-title">📱 ניהול מכשירים</p>
+            <div class="online-count" id="onlineCount"></div>
             <div class="requests-area" id="requestsArea"></div>
             <button class="devices-toggle" onclick="toggleDevicesList()">📋 מכשירים רשומים <span id="devicesCount"></span></button>
             <div class="devices-list" id="devicesList"></div>
@@ -211,6 +235,15 @@
 
     </div>
     <div class="scroll-content" id="listArea"></div>
+</div>
+
+<!-- מודל היסטוריית חיבורים -->
+<div id="historyOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:998; justify-content:center; align-items:center;">
+    <div class="modal-box">
+        <h3 id="historyTitle" style="margin-top:0"></h3>
+        <div class="history-list" id="historyList"></div>
+        <button onclick="document.getElementById('historyOverlay').style.display='none'" style="background:#dc3545; width:100%; color:white; border:none; padding:10px; border-radius:5px; margin-top:10px;">סגור</button>
+    </div>
 </div>
 
 <!-- MODAL -->
@@ -254,7 +287,22 @@
     let editingIndex = -1;
     let devices = {};   // uid -> device
     let requests = {};  // uid -> request
+    let statuses = {};  // uid -> {online, since, lastSeen}
     let suppressNextStreets = false;
+
+    const APPROVE_PIN = '5555';
+    function askPin(action) {
+        const p = prompt('🔒 ' + action + ' — הזן סיסמת אישור:');
+        if (p === null) return false;
+        if (p !== APPROVE_PIN) { alert('❌ סיסמה שגויה'); return false; }
+        return true;
+    }
+
+    function fmtTs(ts) {
+        if (!ts) return '';
+        const d = new Date(ts);
+        return d.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
 
     // ══════════════════════════════════════════
     //  כניסה
@@ -356,6 +404,10 @@
             devices = snap.val() || {};
             renderDevicesList();
         });
+        rtdb.ref('status').on('value', (snap) => {
+            statuses = snap.val() || {};
+            renderDevicesList();
+        });
     }
 
     function renderRequests() {
@@ -376,6 +428,7 @@
     }
 
     function approveDevice(uid) {
+        if (!askPin('אישור מכשיר חדש')) return;
         const r = requests[uid] || {};
         const nickname = prompt('שם/כינוי למכשיר (למשל: יוסי שליח):', r.model || '') || (r.model || 'ללא שם');
         rtdb.ref('devices/' + uid).set({
@@ -396,8 +449,12 @@
         const d = devices[uid];
         if (!d) return;
         const newVal = !(d.approved === true);
-        const verb = newVal ? 'לשחרר' : 'לחסום';
-        if (!confirm(verb + ' את "' + d.nickname + '"?')) return;
+        if (newVal) {
+            // שחרור חסימה — דורש סיסמה כמו אישור
+            if (!askPin('שחרור חסימה')) return;
+        } else {
+            if (!confirm('לחסום את "' + d.nickname + '"?')) return;
+        }
         rtdb.ref('devices/' + uid + '/approved').set(newVal);
     }
 
@@ -405,6 +462,35 @@
         const d = devices[uid];
         if (!confirm('למחוק את "' + (d ? d.nickname : uid) + '" לגמרי?\n(המכשיר יוכל לבקש רישום מחדש)')) return;
         rtdb.ref('devices/' + uid).remove();
+        rtdb.ref('status/' + uid).remove();
+        rtdb.ref('sessions/' + uid).remove();
+    }
+
+    function editNickname(uid) {
+        const d = devices[uid];
+        if (!d) return;
+        const nn = prompt('כינוי חדש:', d.nickname || '');
+        if (nn === null || !nn.trim()) return;
+        rtdb.ref('devices/' + uid + '/nickname').set(nn.trim());
+    }
+
+    function openHistory(uid) {
+        const d = devices[uid] || {};
+        document.getElementById('historyTitle').innerText = '🕐 היסטוריה — ' + (d.nickname || uid);
+        const listEl = document.getElementById('historyList');
+        listEl.innerHTML = '<div style="color:gray">טוען...</div>';
+        document.getElementById('historyOverlay').style.display = 'flex';
+        rtdb.ref('sessions/' + uid).once('value').then((snap) => {
+            const sessions = snap.val() || {};
+            const keys = Object.keys(sessions).sort().reverse(); // חדש למעלה
+            if (!keys.length) { listEl.innerHTML = '<div style="color:gray">אין היסטוריית חיבורים עדיין</div>'; return; }
+            listEl.innerHTML = keys.map(k => {
+                const s = sessions[k];
+                const start = fmtTs(s.start);
+                const end = s.end ? fmtTs(s.end) : null;
+                return `<div class="history-item"><b>${start}</b> ← ${end ? end : '<span class="live">מחובר עכשיו 🟢</span>'}</div>`;
+            }).join('');
+        });
     }
 
     function toggleDevicesList() {
@@ -416,19 +502,40 @@
         const list = document.getElementById('devicesList');
         const keys = Object.keys(devices);
         document.getElementById('devicesCount').textContent = keys.length ? `(${keys.length})` : '';
+
+        // מונה מחוברים — רק מכשירים מאושרים שמחוברים כרגע
+        const onlineNow = keys.filter(uid =>
+            devices[uid].approved === true && statuses[uid] && statuses[uid].online === true
+        ).length;
+        document.getElementById('onlineCount').innerHTML =
+            onlineNow > 0 ? '🟢 ' + onlineNow + ' מחוברים עכשיו' : '⚪ אף אחד לא מחובר כרגע';
+
         if (!keys.length) { list.innerHTML = '<div class="devices-empty">אין מכשירים רשומים עדיין</div>'; return; }
         list.innerHTML = keys.map(uid => {
             const d = devices[uid];
             const blocked = d.approved !== true;
+            const st = statuses[uid] || {};
+            const online = st.online === true;
+            let presenceHtml;
+            if (online) {
+                presenceHtml = `<span class="presence-dot"></span> <span class="presence-text">מחובר${st.since ? ' מ-' + fmtTs(st.since) : ''}</span>`;
+            } else if (st.lastSeen) {
+                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">נראה לאחרונה: ${fmtTs(st.lastSeen)}</span>`;
+            } else {
+                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">לא התחבר עדיין</span>`;
+            }
             return `<div class="device-item ${blocked ? 'blocked' : ''}">
                 <div class="device-info">
                     <div class="device-name">📱 ${d.nickname} ${blocked ? '🚫 חסום' : ''}</div>
+                    <div style="margin:2px 0">${presenceHtml}</div>
                     <div class="device-id-text">${d.shortId || ''} · ${d.model || ''}</div>
-                    <div class="device-date">📅 ${d.date || ''}</div>
+                    <div class="device-date">📅 אושר: ${d.date || ''}</div>
                 </div>
-                <div class="device-btns">
+                <div class="device-btns" style="flex-direction:column">
                     <button class="block-btn ${blocked ? 'unblock-btn' : ''}" onclick="toggleBlockDevice('${uid}')">${blocked ? '✅ שחרר' : '🚫 חסום'}</button>
-                    <button class="device-del-btn" onclick="deleteDevice('${uid}')">✕</button>
+                    <button class="small-btn" onclick="openHistory('${uid}')">🕐 היסטוריה</button>
+                    <button class="small-btn" onclick="editNickname('${uid}')">✏️ כינוי</button>
+                    <button class="device-del-btn" onclick="deleteDevice('${uid}')">✕ מחק</button>
                 </div>
             </div>`;
         }).join('');
