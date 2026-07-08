@@ -466,6 +466,26 @@
     // ══════════════════════════════════════════
     //  חיפוש ורשימה
     // ══════════════════════════════════════════
+
+    // ניקוי תווים בלתי נראים שאייפון מוסיף בהכתבה קולית (RTL marks, רווחים מיוחדים)
+    function cleanText(s) {
+        if (!s) return '';
+        let t = String(s);
+        try { t = t.normalize('NFKC'); } catch(e) {}
+        t = t.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '');
+        t = t.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+        return t.replace(/\s+/g, ' ').trim();
+    }
+
+    // מילות מספר בעברית שההכתבה משאירה כמילים → חלופה ספרתית בחיפוש
+    const NUM_WORDS = {
+        'אחד':'1','אחת':'1','שניים':'2','שתיים':'2',
+        'שלוש':'3','שלושה':'3','ארבע':'4','ארבעה':'4',
+        'חמש':'5','חמישה':'5','שש':'6','שישה':'6',
+        'שבע':'7','שבעה':'7','שמונה':'8','תשע':'9','תשעה':'9',
+        'עשר':'10','עשרה':'10'
+    };
+
     function handleSearch() {
         const val = document.getElementById('search').value;
         document.getElementById('clearSearchBtn').style.display = val ? 'flex' : 'none';
@@ -474,11 +494,15 @@
     function clearSearch() { document.getElementById('search').value = ''; handleSearch(); }
 
     function render() {
-        const q = document.getElementById('search').value.toLowerCase().trim();
-        const terms = q.split(/\s+/);
+        const q = cleanText(document.getElementById('search').value).toLowerCase();
+        const terms = q.split(/\s+/).filter(Boolean);
         const filtered = db.filter(i => {
-            const text = (i.street + ' ' + i.number).toLowerCase();
-            return terms.every(t => text.includes(t));
+            const text = cleanText(i.street + ' ' + i.number).toLowerCase();
+            return terms.every(t => {
+                if (text.includes(t)) return true;
+                const alt = NUM_WORDS[t];
+                return alt ? text.includes(alt) : false;
+            });
         });
         filtered.sort((a, b) => {
             const s = a.street.localeCompare(b.street);
@@ -532,7 +556,7 @@
         };
         micRecognition.onresult = (e) => {
             clearTimeout(micTimer);
-            const transcript = e.results[0][0].transcript.trim();
+            const transcript = cleanText(e.results[0][0].transcript);
             document.getElementById('search').value = transcript;
             handleSearch();
             stopMic();
