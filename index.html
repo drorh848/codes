@@ -325,17 +325,16 @@
     }
 
     function sendRequestIfNeeded() {
-        if (localStorage.getItem('requestSent_' + myUid) === 'true') return;
-        rtdb.ref('requests/' + myUid).set({
-            shortId: myShortId,
-            model: getStableModel(),
-            date: new Date().toLocaleString('he-IL')
-        }).then(() => {
-            localStorage.setItem('requestSent_' + myUid, 'true');
-        }).catch(() => {
-            // כנראה כבר קיימת בקשה (מותר לכתוב רק פעם אחת) — סמן כנשלחה
-            localStorage.setItem('requestSent_' + myUid, 'true');
-        });
+        // בדוק מול השרת אם הבקשה שלי עדיין קיימת
+        rtdb.ref('requests/' + myUid).once('value').then((snap) => {
+            if (snap.exists()) return; // הבקשה ממתינה — הכול תקין
+            // אין בקשה (נמחקה/נדחתה) — שלח חדשה
+            rtdb.ref('requests/' + myUid).set({
+                shortId: myShortId,
+                model: getStableModel(),
+                date: new Date().toLocaleString('he-IL')
+            });
+        }).catch(() => {});
     }
 
     // ══════════════════════════════════════════
