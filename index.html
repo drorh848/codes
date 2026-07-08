@@ -298,14 +298,17 @@
             if (dev && dev.approved === true) {
                 localStorage.setItem('approvedCache', 'true');
                 startApprovedFlow();
+                startPresence();
             } else if (dev && dev.approved === false) {
                 // נחסם — נקה הכול
+                stopPresence();
                 stopStreets();
                 localStorage.removeItem('approvedCache');
                 localStorage.removeItem('streetsCache');
                 showBlocked();
             } else {
                 // אין רשומת מכשיר — שלח בקשת רישום
+                stopPresence();
                 stopStreets();
                 localStorage.removeItem('approvedCache');
                 localStorage.removeItem('streetsCache');
@@ -381,6 +384,60 @@
         const st = document.getElementById('syncStatus');
         if (online) { dot.classList.remove('offline'); st.childNodes[1].textContent = 'מסונכרן'; }
         else { dot.classList.add('offline'); st.childNodes[1].textContent = 'לא מקוון — נתונים שמורים'; }
+    }
+
+    // ══════════════════════════════════════════
+    //  נוכחות — דיווח מחובר/מנותק + היסטוריית סשנים
+    // ══════════════════════════════════════════
+    let presenceArmed = false;
+    let currentSessionRef = null;
+    let connWatcher = null;
+
+    function startPresence() {
+        if (presenceArmed) return;
+        presenceArmed = true;
+        connWatcher = rtdb.ref('.info/connected');
+        connWatcher.on('value', onConnChange);
+    }
+
+    function onConnChange(snap) {
+        if (snap.val() !== true || !presenceArmed) return;
+        const TS = firebase.database.ServerValue.TIMESTAMP;
+        const stRef = rtdb.ref('status/' + myUid);
+        // אם החיבור ייפול — השרת יסמן מנותק אוטומטית
+        stRef.onDisconnect().set({ online: false, lastSeen: TS });
+        stRef.set({ online: true, since: TS });
+        // פתיחת סשן חדש בהיסטוריה
+        currentSessionRef = rtdb.ref('sessions/' + myUid).push();
+        currentSessionRef.onDisconnect().update({ end: TS });
+        currentSessionRef.set({ start: TS });
+        trimSessions();
+    }
+
+    // שמירת 30 סשנים אחרונים בלבד
+    function trimSessions() {
+        rtdb.ref('sessions/' + myUid).once('value').then((snap) => {
+            const keys = Object.keys(snap.val() || {}).sort();
+            while (keys.length > 30) {
+                rtdb.ref('sessions/' + myUid + '/' + keys.shift()).remove();
+            }
+        }).catch(() => {});
+    }
+
+    function stopPresence() {
+        if (!presenceArmed) return;
+        presenceArmed = false;
+        if (connWatcher) { connWatcher.off('value', onConnChange); connWatcher = null; }
+        const TS = firebase.database.ServerValue.TIMESTAMP;
+        try {
+            rtdb.ref('status/' + myUid).onDisconnect().cancel();
+            rtdb.ref('status/' + myUid).set({ online: false, lastSeen: TS });
+            if (currentSessionRef) {
+                currentSessionRef.onDisconnect().cancel();
+                currentSessionRef.update({ end: TS });
+                currentSessionRef = null;
+            }
+        } catch(e) {}
     }
 
     // ══════════════════════════════════════════
