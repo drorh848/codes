@@ -610,6 +610,25 @@
     // ══════════════════════════════════════════
     //  רחובות — CRUD
     // ══════════════════════════════════════════
+
+    // ניקוי תווים בלתי נראים שאייפון מוסיף בהכתבה קולית
+    function cleanText(s) {
+        if (!s) return '';
+        let t = String(s);
+        try { t = t.normalize('NFKC'); } catch(e) {}
+        t = t.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '');
+        t = t.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+        return t.replace(/\s+/g, ' ').trim();
+    }
+
+    const NUM_WORDS = {
+        'אחד':'1','אחת':'1','שניים':'2','שתיים':'2',
+        'שלוש':'3','שלושה':'3','ארבע':'4','ארבעה':'4',
+        'חמש':'5','חמישה':'5','שש':'6','שישה':'6',
+        'שבע':'7','שבעה':'7','שמונה':'8','תשע':'9','תשעה':'9',
+        'עשר':'10','עשרה':'10'
+    };
+
     function sortDB() {
         db.sort((a, b) => {
             const s = a.street.localeCompare(b.street);
@@ -624,10 +643,17 @@
     function clearSearch() { document.getElementById('searchBox').value = ''; handleSearch(); }
     function renderList() {
         const container = document.getElementById('listArea'); container.innerHTML = '';
-        const q = document.getElementById('searchBox').value.toLowerCase().trim();
-        const terms = q.split(/\s+/);
+        const q = cleanText(document.getElementById('searchBox').value).toLowerCase();
+        const terms = q.split(/\s+/).filter(Boolean);
         const filtered = db.map((item, index) => ({ ...item, originalIndex: index }))
-            .filter(item => { const text = (item.street + ' ' + item.number).toLowerCase(); return terms.every(t => text.includes(t)); });
+            .filter(item => {
+                const text = cleanText(item.street + ' ' + item.number).toLowerCase();
+                return terms.every(t => {
+                    if (text.includes(t)) return true;
+                    const alt = NUM_WORDS[t];
+                    return alt ? text.includes(alt) : false;
+                });
+            });
         filtered.forEach(item => {
             const div = document.createElement('div'); div.className = 'card';
             div.innerHTML = `<div><b>${item.street} ${item.number}</b><br><span style="color:#007bff;font-weight:bold">${item.code}</span></div>
@@ -785,7 +811,7 @@
         };
         micRecognition.onresult = (e) => {
             clearTimeout(micTimer);
-            const transcript = e.results[0][0].transcript.trim();
+            const transcript = cleanText(e.results[0][0].transcript);
             document.getElementById('searchBox').value = transcript;
             handleSearch();
             stopMic();
