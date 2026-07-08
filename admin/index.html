@@ -90,10 +90,24 @@
             border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
         }
         .devices-empty { color: #7f8c8d; font-size: 11px; text-align: center; padding: 5px; }
-        .online-count {
-            text-align: center; font-size: 13px; font-weight: bold;
-            color: #2ecc71; margin-bottom: 6px;
+        /* ── שורת מנורות + אקורדיונים ── */
+        .lamps-row { display: flex; gap: 6px; }
+        .lamp {
+            flex: 1; background: #34495e; color: white; border: none;
+            border-radius: 8px; padding: 10px 6px; font-size: 13px;
+            font-weight: bold; cursor: pointer;
         }
+        .lamp .lamp-arrow { font-size: 10px; opacity: 0.7; margin-right: 3px; }
+        .lamp.alert {
+            background: #7a3b00; border: 1px solid #e67e22; color: #ffe27a;
+            animation: lampPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes lampPulse { 0%,100%{opacity:1} 50%{opacity:0.72} }
+        .lamp.open { background: #f1c40f; color: #2c3e50; animation: none; }
+        .accordion { display: none; margin-top: 6px; }
+        .accordion.open { display: block; }
+        .request-item.old { opacity: 0.55; border-color: #7f8c8d; }
+        .old-tag { color: #bdc3c7; font-size: 10px; }
         .presence-dot {
             display: inline-block; width: 9px; height: 9px; border-radius: 50%;
             background: #2ecc71; margin-left: 4px; vertical-align: middle;
@@ -203,12 +217,17 @@
 
         <!-- ניהול מכשירים -->
         <div class="security-box">
-            <p class="security-title">📱 ניהול מכשירים</p>
-            <div class="online-count" id="onlineCount"></div>
-            <div class="requests-area" id="requestsArea"></div>
-            <button class="devices-toggle" onclick="toggleDevicesList()">📋 מכשירים רשומים <span id="devicesCount"></span></button>
-            <div class="devices-list" id="devicesList"></div>
-            <button class="logout-btn" onclick="doLogout()">🚪 התנתק</button>
+            <div class="lamps-row">
+                <button class="lamp" id="lampOnline" onclick="toggleAcc('devices')">🟢 <span id="onlineNum">0</span> מחוברים <span class="lamp-arrow">▼</span></button>
+                <button class="lamp" id="lampRequests" onclick="toggleAcc('requests')">🔔 <span id="reqNum">0</span> בקשות (24ש') <span class="lamp-arrow">▼</span></button>
+            </div>
+            <div class="accordion" id="accRequests">
+                <div class="requests-area" id="requestsArea"></div>
+            </div>
+            <div class="accordion" id="accDevices">
+                <div class="devices-list" id="devicesList" style="display:block"></div>
+                <button class="logout-btn" onclick="doLogout()">🚪 התנתק</button>
+            </div>
         </div>
 
         <!-- FORM -->
@@ -302,6 +321,45 @@
         if (!ts) return '';
         const d = new Date(ts);
         return d.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // פענוח תאריך בפורמט עברי "8.7.2026, 18:49:10" → מילישניות
+    function parseHeDate(s) {
+        if (!s) return null;
+        const m = String(s).match(/(\d{1,2})\.(\d{1,2})\.(\d{4}),?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (!m) return null;
+        return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0)).getTime();
+    }
+
+    // שם דגם ידידותי
+    function friendlyModel(model) {
+        if (!model) return '';
+        if (/^SM-/i.test(model)) return 'Samsung ' + model;
+        if (/^CPH|^PJ[A-Z]/i.test(model)) return 'OnePlus/Oppo ' + model;
+        if (/^2\d{4}/.test(model)) return 'Xiaomi ' + model;
+        if (/Pixel/i.test(model)) return 'Google ' + model;
+        return model;
+    }
+
+    // אקורדיונים — פתיחת אחד סוגרת את השני
+    function toggleAcc(which) {
+        const req = document.getElementById('accRequests');
+        const dev = document.getElementById('accDevices');
+        const lampR = document.getElementById('lampRequests');
+        const lampO = document.getElementById('lampOnline');
+        if (which === 'requests') {
+            const opening = !req.classList.contains('open');
+            req.classList.toggle('open', opening);
+            dev.classList.remove('open');
+            lampR.classList.toggle('open', opening);
+            lampO.classList.remove('open');
+        } else {
+            const opening = !dev.classList.contains('open');
+            dev.classList.toggle('open', opening);
+            req.classList.remove('open');
+            lampO.classList.toggle('open', opening);
+            lampR.classList.remove('open');
+        }
     }
 
     // ══════════════════════════════════════════
@@ -413,24 +471,39 @@
     function renderRequests() {
         const area = document.getElementById('requestsArea');
         const keys = Object.keys(requests);
-        if (!keys.length) { area.innerHTML = ''; return; }
-        area.innerHTML = keys.map(uid => {
+        const now = Date.now();
+        const DAY = 24 * 60 * 60 * 1000;
+        const infos = keys.map(uid => {
             const r = requests[uid];
-            return `<div class="request-item">
+            const ts = parseHeDate(r.date);
+            // אם התאריך לא ניתן לפענוח — נחשיב כחדשה (עדיף להציג מדי מאשר לפספס)
+            const recent = ts === null ? true : (now - ts) <= DAY;
+            return { uid, r, ts: ts || 0, recent };
+        }).sort((a, b) => b.ts - a.ts);
+
+        const recentCount = infos.filter(i => i.recent).length;
+        document.getElementById('reqNum').textContent = recentCount;
+        document.getElementById('lampRequests').classList.toggle('alert', recentCount > 0);
+
+        if (!keys.length) {
+            area.innerHTML = '<div class="devices-empty">אין בקשות ממתינות</div>';
+            return;
+        }
+        area.innerHTML = infos.map(({ uid, r, recent }) => `
+            <div class="request-item ${recent ? '' : 'old'}">
                 <div class="request-info">
-                    <div class="request-id">🆕 ${r.shortId || '????'}</div>
-                    <div class="request-meta">${r.model || ''} · ${r.date || ''}</div>
+                    <div class="request-id">🆕 ${r.shortId || '????'} ${recent ? '' : '<span class="old-tag">· ישנה</span>'}</div>
+                    <div class="request-meta">${friendlyModel(r.model)} · ${r.date || ''}</div>
                 </div>
                 <button class="approve-btn" onclick="approveDevice('${uid}')">✅ אשר</button>
                 <button class="reject-btn" onclick="rejectRequest('${uid}')">✕</button>
-            </div>`;
-        }).join('');
+            </div>`).join('');
     }
 
     function approveDevice(uid) {
         if (!askPin('אישור מכשיר חדש')) return;
         const r = requests[uid] || {};
-        const nickname = prompt('שם/כינוי למכשיר (למשל: יוסי שליח):', r.model || '') || (r.model || 'ללא שם');
+        const nickname = prompt('שם/כינוי למכשיר (למשל: יוסי שליח):', friendlyModel(r.model) || '') || (friendlyModel(r.model) || 'ללא שם');
         rtdb.ref('devices/' + uid).set({
             nickname: nickname,
             model: r.model || '',
@@ -493,22 +566,15 @@
         });
     }
 
-    function toggleDevicesList() {
-        const list = document.getElementById('devicesList');
-        list.style.display = list.style.display === 'block' ? 'none' : 'block';
-    }
-
     function renderDevicesList() {
         const list = document.getElementById('devicesList');
         const keys = Object.keys(devices);
-        document.getElementById('devicesCount').textContent = keys.length ? `(${keys.length})` : '';
 
-        // מונה מחוברים — רק מכשירים מאושרים שמחוברים כרגע
+        // מונה המנורה הירוקה — רק מכשירים מאושרים שמחוברים כרגע
         const onlineNow = keys.filter(uid =>
             devices[uid].approved === true && statuses[uid] && statuses[uid].online === true
         ).length;
-        document.getElementById('onlineCount').innerHTML =
-            onlineNow > 0 ? '🟢 ' + onlineNow + ' מחוברים עכשיו' : '⚪ אף אחד לא מחובר כרגע';
+        document.getElementById('onlineNum').textContent = onlineNow;
 
         if (!keys.length) { list.innerHTML = '<div class="devices-empty">אין מכשירים רשומים עדיין</div>'; return; }
         list.innerHTML = keys.map(uid => {
