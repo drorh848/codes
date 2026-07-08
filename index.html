@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>איתור קודים</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#007aff">
+    <!-- תגיות אפל ל-PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="קודים">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh;
+            font-family: -apple-system, 'Segoe UI', sans-serif; background: #f2f2f7;
+            overflow: hidden; position: fixed;
+        }
+
+        /* ── מסך טעינה ── */
+        #loadingScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1c1c1e; color: white; z-index: 10000;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center; gap: 16px;
+        }
+        .spinner {
+            width: 44px; height: 44px; border: 4px solid #333;
+            border-top-color: #007aff; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── מסך רישום / המתנה / חסימה ── */
+        #registerScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1c1c1e; color: white; z-index: 9999;
+            display: none; flex-direction: column;
+            justify-content: center; align-items: center;
+            padding: 20px; text-align: center; overflow-y: auto;
+        }
+        #registerScreen h2 { font-size: 22px; margin: 0 0 8px 0; }
+        #registerScreen p { color: #aaa; font-size: 14px; margin: 6px 0; }
+        .device-id-box {
+            font-size: 30px; font-weight: bold; color: #f1c40f;
+            border: 2px dashed #f1c40f; padding: 10px 28px;
+            border-radius: 10px; margin: 14px 0; letter-spacing: 4px;
+            user-select: all;
+        }
+        .action-btn {
+            font-size: 17px; padding: 13px 30px; background: #30d158;
+            color: white; border: none; border-radius: 10px;
+            font-weight: bold; cursor: pointer; margin-bottom: 10px; width: 250px;
+        }
+        .wa-btn { background: #25d366; }
+        .copy-btn { background: #007aff; font-size: 15px; }
+        .waiting-anim {
+            display: inline-block; margin-top: 10px;
+            color: #f1c40f; font-weight: bold; font-size: 15px;
+        }
+        .waiting-anim .dots::after {
+            content: ''; animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
+        .blocked-icon { font-size: 54px; margin-bottom: 10px; }
+
+        /* ── באנר התקנה לאייפון ── */
+        #iosBanner {
+            display: none; background: #007aff; color: white;
+            padding: 10px 12px; font-size: 13px; line-height: 1.5;
+            position: relative; flex-shrink: 0;
+        }
+        #iosBanner b { color: #ffe27a; }
+        #iosBannerClose {
+            position: absolute; top: 6px; left: 8px;
+            background: rgba(255,255,255,0.25); border: none; color: white;
+            border-radius: 50%; width: 24px; height: 24px; font-size: 14px;
+            cursor: pointer; line-height: 1;
+        }
+
+        /* ── אפליקציה ראשית ── */
+        .app-wrapper { display: none; flex-direction: column; height: 100%; width: 100%; }
+        .header { background: #fff; padding: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); z-index: 10; flex-shrink: 0; }
+        .sync-row {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px; font-size: 12px; color: gray;
+        }
+        .sync-dot {
+            display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+            background: #30d158; margin-left: 5px; vertical-align: middle;
+        }
+        .sync-dot.offline { background: #ff9f0a; }
+        .search-wrapper { position: relative; width: 100%; height: 48px; display: flex; align-items: center; gap: 6px; }
+        .search-box {
+            flex: 1; height: 100%; padding: 12px 12px 12px 60px; font-size: 19px;
+            border-radius: 10px; border: 1px solid #ccc; background: #e5e5ea;
+            text-align: right; outline: none;
+        }
+        .clear-btn {
+            position: absolute; left: 56px; top: 0; bottom: 0;
+            background: #dc3545; color: white; border-radius: 0; width: 46px;
+            display: none; justify-content: center; align-items: center;
+            cursor: pointer; font-size: 22px; font-weight: bold; z-index: 5;
+        }
+        .mic-btn-user {
+            flex-shrink: 0; min-width: 46px; width: 46px; height: 46px; background: #007aff;
+            border: none; border-radius: 10px; color: white; font-size: 22px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            overflow: hidden;
+        }
+        .mic-btn-user.listening { background: #ff3b30; animation: micPulse 0.7s ease-in-out infinite; }
+        @keyframes micPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .mic-status-user { display: none; text-align: center; font-size: 12px; color: #ff3b30; font-weight: bold; margin-top: 3px; }
+        .mic-status-user.show { display: block; }
+        #count { text-align: center; color: gray; font-size: 12px; margin-top: 5px; }
+        .list-area { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 10px 120px 10px; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+        .card {
+            background: #fff; padding: 15px; margin-bottom: 10px;
+            border-radius: 12px; display: flex; justify-content: space-between;
+            align-items: center; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        .street-info { font-size: 18px; font-weight: bold; color: #333; }
+        .num-info { font-size: 20px; font-weight: 900; color: #000; margin-top: 3px; }
+        .code-badge { font-size: 26px; font-weight: 800; color: #007aff; background: #f2f2f7; padding: 6px 14px; border-radius: 10px; }
+        .empty-msg { text-align: center; color: gray; margin-top: 40px; font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<!-- מסך טעינה -->
+<div id="loadingScreen">
+    <div class="spinner"></div>
+    <p style="color:#aaa">מתחבר...</p>
+</div>
+
+<!-- מסך רישום / המתנה / חסימה -->
+<div id="registerScreen">
+    <!-- מצב: בקשה חדשה / ממתין לאישור -->
+    <div id="pendingView">
+        <h2>📱 רישום מכשיר</h2>
+        <p>שלח לדרור את המזהה שלך לאישור:</p>
+        <div id="deviceIDDisplay" class="device-id-box">...</div>
+        <p id="deviceModelLabel" style="font-size:12px;color:#777"></p>
+        <button class="action-btn wa-btn" onclick="sendWhatsApp()">💬 שלח בוואטסאפ</button>
+        <button class="action-btn copy-btn" onclick="copyID()">📋 העתק מזהה</button>
+        <div class="waiting-anim">⏳ ממתין לאישור<span class="dots"></span></div>
+        <p style="font-size:12px;color:#666;margin-top:14px">האפליקציה תיפתח אוטומטית ברגע שדרור יאשר.<br>אפשר להשאיר את המסך פתוח.</p>
+    </div>
+    <!-- מצב: חסום -->
+    <div id="blockedView" style="display:none">
+        <div class="blocked-icon">🚫</div>
+        <h2>הגישה נחסמה</h2>
+        <p>המכשיר הזה נחסם על ידי המנהל.<br>לבירור — פנה לדרור.</p>
+    </div>
+</div>
+
+<!-- אפליקציה ראשית -->
+<div class="app-wrapper" id="appWrapper">
+    <div id="iosBanner">
+        <button id="iosBannerClose" onclick="dismissIosBanner()">✕</button>
+        💡 כדי שהנתונים יישמרו לתמיד: לחץ על כפתור <b>שיתוף</b> בספארי ← <b>הוסף למסך הבית</b>
+    </div>
+    <div class="header">
+        <div class="sync-row">
+            <span id="syncStatus"><span class="sync-dot" id="syncDot"></span>מסונכרן</span>
+            <span id="lastUpdate"></span>
+        </div>
+        <div class="search-wrapper">
+            <input type="text" class="search-box" id="search" placeholder="🔍 חפש רחוב..." oninput="handleSearch()">
+            <div id="clearSearchBtn" class="clear-btn" onclick="clearSearch()">✕</div>
+            <button class="mic-btn-user" id="micBtn" onclick="toggleMic()">🎤</button>
+        </div>
+        <div class="mic-status-user" id="micStatus">🎙 מקשיב... (3 שניות)</div>
+        <div id="count"></div>
+    </div>
+    <div class="list-area" id="list"></div>
+</div>
+
+<!-- Firebase compat SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+
+<script>
+    // ══════════════════════════════════════════
+    //  Firebase
+    // ══════════════════════════════════════════
+    const firebaseConfig = {
+        apiKey: "AIzaSyCct-IRJlo06LsAQX3Dl6zaDwSoDR3XXn0",
+        authDomain: "clouddeliver-codes.firebaseapp.com",
+        databaseURL: "https://clouddeliver-codes-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "clouddeliver-codes",
+        storageBucket: "clouddeliver-codes.firebasestorage.app",
+        messagingSenderId: "334584639176",
+        appId: "1:334584639176:web:a03df8c88b9c0adad77ffd"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const rtdb = firebase.database();
+
+    // חצי מפתח הצפנה בקוד — החצי השני יושב ב-Firebase ונגיש רק למכשירים מאושרים
+    const KEY_PART_A = 'CDkeys!2026#srur';
+
+    let myUid = '';
+    let myShortId = '';
+    let encKey = null;
+    let db = [];
+    let streetsListener = null;
+
+    // ══════════════════════════════════════════
+    //  עזרים
+    // ══════════════════════════════════════════
+    function makeShortId(uid) {
+        let hash = 0;
+        for (let i = 0; i < uid.length; i++) hash = ((hash * 31) + uid.charCodeAt(i)) % 1000000;
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let s = '', h = Math.abs(hash);
+        for (let i = 0; i < 4; i++) { s += chars[h % chars.length]; h = Math.floor(h / chars.length); }
+        return s;
+    }
+
+    function getStableModel() {
+        const ua = navigator.userAgent;
+        if (/iPad/.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua))) return 'iPad';
+        if (/iPhone/.test(ua)) return 'iPhone';
+        let m = ua.match(/;\s*([^;)]+)\s+Build\//);
+        if (m) return m[1].trim();
+        if (/Android/.test(ua)) return 'Android';
+        return 'דפדפן';
+    }
+
+    function show(screen) {
+        document.getElementById('loadingScreen').style.display = 'none';
+        document.getElementById('registerScreen').style.display = screen === 'register' ? 'flex' : 'none';
+        document.getElementById('appWrapper').style.display = screen === 'app' ? 'flex' : 'none';
+        if (screen === 'register') {
+            document.getElementById('pendingView').style.display = 'block';
+            document.getElementById('blockedView').style.display = 'none';
+        }
+    }
+    function showBlocked() {
+        document.getElementById('loadingScreen').style.display = 'none';
+        document.getElementById('appWrapper').style.display = 'none';
+        document.getElementById('registerScreen').style.display = 'flex';
+        document.getElementById('pendingView').style.display = 'none';
+        document.getElementById('blockedView').style.display = 'block';
+    }
+
+    // ══════════════════════════════════════════
+    //  התחלה — התחברות אנונימית
+    // ══════════════════════════════════════════
+
+    // אם יש מטמון מאושר — הצג מיד (עבודה אופליין), Firebase יתקן אחר כך
+    (function bootFromCache() {
+        try {
+            if (localStorage.getItem('approvedCache') === 'true') {
+                const cached = JSON.parse(localStorage.getItem('streetsCache') || '[]');
+                if (Array.isArray(cached) && cached.length) {
+                    db = cached;
+                    show('app');
+                    setSyncStatus(false);
+                    render(); updateCount();
+                    const lu = localStorage.getItem('lastUpdate');
+                    if (lu) document.getElementById('lastUpdate').innerText = 'עדכון אחרון: ' + lu;
+                }
+            }
+        } catch(e) {}
+    })();
+
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(() => {
+        auth.onAuthStateChanged((user) => {
+            if (!user) {
+                auth.signInAnonymously().catch((e) => {
+                    console.error(e);
+                    if (localStorage.getItem('approvedCache') !== 'true') {
+                        document.querySelector('#loadingScreen p').innerText = 'אין חיבור לאינטרנט — נסה שוב מאוחר יותר';
+                    }
+                });
+                return;
+            }
+            myUid = user.uid;
+            myShortId = makeShortId(myUid);
+            document.getElementById('deviceIDDisplay').innerText = myShortId;
+            document.getElementById('deviceModelLabel').innerText = '(' + getStableModel() + ')';
+            watchDeviceStatus();
+        });
+    });
+
+    // ══════════════════════════════════════════
+    //  מעקב אחרי סטטוס המכשיר בזמן אמת
+    // ══════════════════════════════════════════
+    function watchDeviceStatus() {
+        rtdb.ref('devices/' + myUid).on('value', (snap) => {
+            const dev = snap.val();
+            if (dev && dev.approved === true) {
+                localStorage.setItem('approvedCache', 'true');
+                startApprovedFlow();
+            } else if (dev && dev.approved === false) {
+                // נחסם — נקה הכול
+                stopStreets();
+                localStorage.removeItem('approvedCache');
+                localStorage.removeItem('streetsCache');
+                showBlocked();
+            } else {
+                // אין רשומת מכשיר — שלח בקשת רישום
+                stopStreets();
+                localStorage.removeItem('approvedCache');
+                localStorage.removeItem('streetsCache');
+                sendRequestIfNeeded();
+                show('register');
+            }
+        }, (err) => {
+            // אין הרשאה עדיין / אופליין — אם יש מטמון כבר מוצג, אחרת מסך רישום
+            if (localStorage.getItem('approvedCache') !== 'true') {
+                sendRequestIfNeeded();
+                show('register');
+            }
+        });
+    }
+
+    function sendRequestIfNeeded() {
+        if (localStorage.getItem('requestSent_' + myUid) === 'true') return;
+        rtdb.ref('requests/' + myUid).set({
+            shortId: myShortId,
+            model: getStableModel(),
+            date: new Date().toLocaleString('he-IL')
+        }).then(() => {
+            localStorage.setItem('requestSent_' + myUid, 'true');
+        }).catch(() => {
+            // כנראה כבר קיימת בקשה (מותר לכתוב רק פעם אחת) — סמן כנשלחה
+            localStorage.setItem('requestSent_' + myUid, 'true');
+        });
+    }
+
+    // ══════════════════════════════════════════
+    //  זרימת מכשיר מאושר — מפתח + רחובות
+    // ══════════════════════════════════════════
+    function startApprovedFlow() {
+        rtdb.ref('config/encKeyPart').once('value').then((snap) => {
+            const partB = snap.val();
+            if (!partB) { alert('המערכת עוד לא אותחלה — פנה לדרור'); return; }
+            encKey = KEY_PART_A + partB;
+            subscribeStreets();
+            show('app');
+            checkIosBanner();
+        }).catch(() => {
+            // אופליין — הסתמך על מטמון
+            if (db.length) { show('app'); setSyncStatus(false); }
+        });
+    }
+
+    function subscribeStreets() {
+        stopStreets();
+        streetsListener = rtdb.ref('streets').on('value', (snap) => {
+            const blob = snap.val();
+            if (!blob) { db = []; render(); updateCount(); return; }
+            try {
+                const bytes = CryptoJS.AES.decrypt(blob, encKey);
+                const json = bytes.toString(CryptoJS.enc.Utf8);
+                db = JSON.parse(json);
+                if (!Array.isArray(db)) db = [];
+            } catch(e) { console.error('decrypt fail', e); return; }
+            const now = new Date().toLocaleString('he-IL');
+            localStorage.setItem('streetsCache', JSON.stringify(db));
+            localStorage.setItem('lastUpdate', now);
+            document.getElementById('lastUpdate').innerText = 'עדכון אחרון: ' + now;
+            setSyncStatus(true);
+            render(); updateCount();
+        }, () => { setSyncStatus(false); });
+    }
+
+    function stopStreets() {
+        if (streetsListener) { rtdb.ref('streets').off('value', streetsListener); streetsListener = null; }
+    }
+
+    function setSyncStatus(online) {
+        const dot = document.getElementById('syncDot');
+        const st = document.getElementById('syncStatus');
+        if (online) { dot.classList.remove('offline'); st.childNodes[1].textContent = 'מסונכרן'; }
+        else { dot.classList.add('offline'); st.childNodes[1].textContent = 'לא מקוון — נתונים שמורים'; }
+    }
+
+    // ══════════════════════════════════════════
+    //  רישום — וואטסאפ והעתקה
+    // ══════════════════════════════════════════
+    function sendWhatsApp() {
+        const msg = 'היי דרור 👋 בקשת גישה לאפליקציית הקודים\nמזהה: ' + myShortId + '\nמכשיר: ' + getStableModel();
+        window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    }
+
+    function copyID() {
+        const doAlert = () => alert('✅ המזהה הועתק!\nשלח אותו לדרור');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(myShortId).then(doAlert).catch(() => fallbackCopy());
+        } else fallbackCopy();
+        function fallbackCopy() {
+            const el = document.getElementById('deviceIDDisplay');
+            const range = document.createRange();
+            range.selectNode(el);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            try { document.execCommand('copy'); doAlert(); }
+            catch(e) { alert('סמן והעתק את המזהה: ' + myShortId); }
+        }
+    }
+
+    // ══════════════════════════════════════════
+    //  חיפוש ורשימה
+    // ══════════════════════════════════════════
+    function handleSearch() {
+        const val = document.getElementById('search').value;
+        document.getElementById('clearSearchBtn').style.display = val ? 'flex' : 'none';
+        render();
+    }
+    function clearSearch() { document.getElementById('search').value = ''; handleSearch(); }
+
+    function render() {
+        const q = document.getElementById('search').value.toLowerCase().trim();
+        const terms = q.split(/\s+/);
+        const filtered = db.filter(i => {
+            const text = (i.street + ' ' + i.number).toLowerCase();
+            return terms.every(t => text.includes(t));
+        });
+        filtered.sort((a, b) => {
+            const s = a.street.localeCompare(b.street);
+            return s !== 0 ? s : parseInt(a.number) - parseInt(b.number);
+        });
+        const list = document.getElementById('list');
+        if (!filtered.length) {
+            list.innerHTML = '<div class="empty-msg">' + (db.length ? 'לא נמצאו תוצאות' : 'אין נתונים עדיין — יגיעו אוטומטית') + '</div>';
+            return;
+        }
+        list.innerHTML = filtered.map(i => `
+            <div class="card">
+                <div>
+                    <div class="street-info">${i.street}</div>
+                    <div class="num-info">${i.number}</div>
+                </div>
+                <div class="code-badge">${i.code}</div>
+            </div>`).join('');
+    }
+
+    function updateCount() {
+        document.getElementById('count').innerText = db.length > 0 ? `${db.length} כתובות במאגר` : 'אין נתונים עדיין';
+    }
+
+    // ══════════════════════════════════════════
+    //  מיקרופון — 3 שניות timeout
+    // ══════════════════════════════════════════
+    let micRecognition = null;
+    let micListening = false;
+    let micTimer = null;
+
+    function toggleMic() {
+        if (micListening) { stopMic(); return; }
+        startMic();
+    }
+
+    function startMic() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { alert('הדפדפן לא תומך בזיהוי קול'); return; }
+        micRecognition = new SR();
+        micRecognition.lang = 'he-IL';
+        micRecognition.continuous = false;
+        micRecognition.interimResults = false;
+
+        micRecognition.onstart = () => {
+            micListening = true;
+            document.getElementById('micBtn').classList.add('listening');
+            document.getElementById('micBtn').textContent = '⏹';
+            document.getElementById('micStatus').classList.add('show');
+            micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
+        };
+        micRecognition.onresult = (e) => {
+            clearTimeout(micTimer);
+            const transcript = e.results[0][0].transcript.trim();
+            document.getElementById('search').value = transcript;
+            handleSearch();
+            stopMic();
+        };
+        micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
+        micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
+        micRecognition.start();
+    }
+
+    function stopMic() {
+        micListening = false;
+        clearTimeout(micTimer);
+        document.getElementById('micBtn').classList.remove('listening');
+        document.getElementById('micBtn').textContent = '🎤';
+        document.getElementById('micStatus').classList.remove('show');
+        if (micRecognition) { try { micRecognition.stop(); } catch(e){} micRecognition = null; }
+    }
+
+    // ══════════════════════════════════════════
+    //  באנר "הוסף למסך הבית" — רק ספארי אייפון
+    // ══════════════════════════════════════════
+    function checkIosBanner() {
+        const isIOS = /iPhone|iPad/.test(navigator.userAgent) ||
+                      (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+        const isStandalone = window.navigator.standalone === true ||
+                             window.matchMedia('(display-mode: standalone)').matches;
+        if (isIOS && !isStandalone && localStorage.getItem('iosBannerDismissed') !== 'true') {
+            document.getElementById('iosBanner').style.display = 'block';
+        }
+    }
+    function dismissIosBanner() {
+        localStorage.setItem('iosBannerDismissed', 'true');
+        document.getElementById('iosBanner').style.display = 'none';
+    }
+
+    // ══════════════════════════════════════════
+    //  Service Worker
+    // ══════════════════════════════════════════
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        });
+    }
+
+    document.getElementById('list').addEventListener('touchstart', () => {
+        document.getElementById('search').blur();
+    });
+</script>
+</body>
+</html>
