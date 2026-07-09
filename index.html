@@ -160,7 +160,7 @@
 <div class="app-wrapper" id="appWrapper">
     <div id="iosBanner">
         <button id="iosBannerClose" onclick="dismissIosBanner()">✕</button>
-        💡 כדי שהנתונים יישמרו לתמיד: לחץ על כפתור <b>שיתוף</b> בספארי ← <b>הוסף למסך הבית</b>
+        💡 מומלץ להתקין: לחץ על כפתור <b>שיתוף</b> בספארי ← <b>הוסף למסך הבית</b>. כך הנתונים יישמרו לתמיד והמיקרופון לא יבקש אישור בכל כניסה
     </div>
     <div class="header">
         <div class="sync-row">
@@ -533,40 +533,63 @@
     let micRecognition = null;
     let micListening = false;
     let micTimer = null;
+    let micStarting = false;
 
     function toggleMic() {
-        if (micListening) { stopMic(); return; }
+        if (micListening || micStarting) { stopMic(); return; }
         startMic();
     }
 
     function startMic() {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) { alert('הדפדפן לא תומך בזיהוי קול'); return; }
-        micRecognition = new SR();
-        micRecognition.lang = 'he-IL';
-        micRecognition.continuous = false;
-        micRecognition.interimResults = false;
+        micStarting = true;
+        // השמדה מסודרת של המופע הקודם — קריטי באייפון, אחרת התחלה חדשה נכשלת בשקט
+        if (micRecognition) {
+            try {
+                micRecognition.onend = null;
+                micRecognition.onerror = null;
+                micRecognition.onresult = null;
+                micRecognition.abort();
+            } catch(e) {}
+            micRecognition = null;
+        }
+        // המתנה קצרה שנותנת לספארי לסגור את הסשן הקודם לפני פתיחת חדש
+        setTimeout(() => {
+            if (!micStarting) return; // בוטל בינתיים בלחיצה נוספת
+            micRecognition = new SR();
+            micRecognition.lang = 'he-IL';
+            micRecognition.continuous = false;
+            micRecognition.interimResults = false;
+            micRecognition.maxAlternatives = 1;
 
-        micRecognition.onstart = () => {
-            micListening = true;
-            document.getElementById('micBtn').classList.add('listening');
-            document.getElementById('micBtn').textContent = '⏹';
-            document.getElementById('micStatus').classList.add('show');
-            micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
-        };
-        micRecognition.onresult = (e) => {
-            clearTimeout(micTimer);
-            const transcript = cleanText(e.results[0][0].transcript);
-            document.getElementById('search').value = transcript;
-            handleSearch();
-            stopMic();
-        };
-        micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
-        micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
-        micRecognition.start();
+            micRecognition.onstart = () => {
+                micStarting = false;
+                micListening = true;
+                // דריסת החיפוש הקודם — התמלול החדש תמיד מחליף
+                document.getElementById('search').value = '';
+                handleSearch();
+                document.getElementById('micBtn').classList.add('listening');
+                document.getElementById('micBtn').textContent = '⏹';
+                document.getElementById('micStatus').classList.add('show');
+                micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
+            };
+            micRecognition.onresult = (e) => {
+                clearTimeout(micTimer);
+                const transcript = cleanText(e.results[0][0].transcript);
+                document.getElementById('search').value = transcript;
+                handleSearch();
+                stopMic();
+            };
+            micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
+            micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
+            try { micRecognition.start(); }
+            catch(e) { micStarting = false; stopMic(); }
+        }, 250);
     }
 
     function stopMic() {
+        micStarting = false;
         micListening = false;
         clearTimeout(micTimer);
         document.getElementById('micBtn').classList.remove('listening');
