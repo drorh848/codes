@@ -597,17 +597,15 @@
                 micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
             };
             micRecognition.onresult = (e) => {
-                clearTimeout(micTimer);
-                // איסוף כל התמלול — כולל תוצאות ביניים
+                // איסוף כל התמלול — כולל תוצאות ביניים (התיקון לאייפון נשאר)
                 let txt = '';
                 for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
                 micCollected = txt;
                 // תצוגה חיה בשדה החיפוש
                 document.getElementById('search').value = cleanText(micCollected);
                 handleSearch();
-                if (e.results[e.results.length - 1].isFinal) { stopMic(); return; }
-                // עדיין מדבר — הארכת ההקשבה בעוד 2 שניות
-                micTimer = setTimeout(() => { if (micListening) stopMic(); }, 2000);
+                // טיימר ה-3 שניות מהלחיצה נשאר קבוע — אין הארכה
+                if (e.results[e.results.length - 1].isFinal) { stopMic(); }
             };
             micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
             micRecognition.onend = () => {
