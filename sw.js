@@ -1,7 +1,13 @@
-// Service Worker — איתור קודים
-// אסטרטגיה: רשת קודם (כדי לקבל עדכונים), נפילה למטמון כשאין אינטרנט
-const CACHE_NAME = 'codes-cache-v1';
-const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+// Service Worker — איתור קודים v2
+// אסטרטגיה: מטמון קודם (פתיחה מיידית גם בלי רשת) + רענון ברקע לעדכונים
+const CACHE_NAME = 'codes-cache-v2';
+const SHELL = [
+  './', './index.html', './manifest.json', './icon-192.png', './icon-512.png',
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js'
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(SHELL)));
@@ -19,18 +25,23 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  // בקשות ל-Firebase לא נוגעים בהן
   const url = e.request.url;
-  if (url.includes('firebase') || url.includes('googleapis') || url.includes('gstatic')) {
+  // תעבורת נתונים חיה של Firebase (מסד נתונים + התחברות) — לא נוגעים
+  if (url.includes('firebasedatabase.app') || url.includes('firebaseio') ||
+      url.includes('identitytoolkit') || url.includes('securetoken')) {
     return;
   }
+  // כל השאר (הדף, האייקונים, ספריות ה-SDK): מטמון קודם, רענון ברקע
   e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(e.request, copy));
+    caches.match(e.request).then((cached) => {
+      const fromNetwork = fetch(e.request).then((res) => {
+        if (res && (res.status === 200 || res.type === 'opaque')) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, copy));
+        }
         return res;
-      })
-      .catch(() => caches.match(e.request).then((m) => m || caches.match('./index.html')))
+      }).catch(() => cached);
+      return cached || fromNetwork;
+    })
   );
 });
