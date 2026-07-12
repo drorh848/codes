@@ -197,9 +197,19 @@
         messagingSenderId: "334584639176",
         appId: "1:334584639176:web:a03df8c88b9c0adad77ffd"
     };
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const rtdb = firebase.database();
+    // אתחול Firebase — עמיד לאופליין: אם ספריות ה-SDK לא נטענו (אין רשת ואין מטמון),
+    // האפליקציה לא קורסת אלא ממשיכה להציג את הנתונים השמורים
+    let auth = null;
+    let rtdb = null;
+    let firebaseReady = false;
+    try {
+        if (typeof firebase !== 'undefined') {
+            firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+            rtdb = firebase.database();
+            firebaseReady = true;
+        }
+    } catch(e) { console.error('Firebase init failed', e); }
 
     // חצי מפתח הצפנה בקוד — החצי השני יושב ב-Firebase ונגיש רק למכשירים מאושרים
     const KEY_PART_A = 'CDkeys!2026#srur';
@@ -270,7 +280,16 @@
         } catch(e) {}
     })();
 
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(() => {
+    // חגורת ביטחון: אם אחרי 5 שניות עדיין תקועים על "מתחבר..." (אין רשת ואין מטמון) — הודעה ברורה
+    setTimeout(() => {
+        const ls = document.getElementById('loadingScreen');
+        if (ls.style.display !== 'none') {
+            document.querySelector('#loadingScreen p').innerText =
+                'אין חיבור לאינטרנט.\nחבר את המכשיר לרשת ופתח שוב — לאחר הפעם הראשונה האפליקציה תעבוד גם בלי אינטרנט.';
+        }
+    }, 5000);
+
+    if (firebaseReady) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(() => {
         auth.onAuthStateChanged((user) => {
             if (!user) {
                 auth.signInAnonymously().catch((e) => {
