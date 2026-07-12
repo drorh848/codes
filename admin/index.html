@@ -568,7 +568,15 @@
 
     function renderDevicesList() {
         const list = document.getElementById('devicesList');
-        const keys = Object.keys(devices);
+        // מיון: מחוברים עכשיו למעלה, אחריהם לפי "נראה לאחרונה" מהחדש לישן, ומי שלא התחבר מעולם — בסוף
+        const keys = Object.keys(devices).sort((a, b) => {
+            const sa = statuses[a] || {}, sb = statuses[b] || {};
+            const aOn = sa.online === true, bOn = sb.online === true;
+            if (aOn !== bOn) return aOn ? -1 : 1;
+            const ta = aOn ? (sa.since || 0) : (sa.lastSeen || 0);
+            const tb = bOn ? (sb.since || 0) : (sb.lastSeen || 0);
+            return tb - ta;
+        });
 
         // מונה המנורה הירוקה — רק מכשירים מאושרים שמחוברים כרגע
         const onlineNow = keys.filter(uid =>
@@ -788,40 +796,61 @@
     let micRecognition = null;
     let micListening = false;
     let micTimer = null;
+    let micStarting = false;
 
     function toggleMic() {
-        if (micListening) { stopMic(); return; }
+        if (micListening || micStarting) { stopMic(); return; }
         startMic();
     }
 
     function startMic() {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) { alert("הדפדפן לא תומך בזיהוי קול"); return; }
-        micRecognition = new SR();
-        micRecognition.lang = 'he-IL';
-        micRecognition.continuous = false;
-        micRecognition.interimResults = false;
+        micStarting = true;
+        // השמדה מסודרת של המופע הקודם — קריטי באייפון
+        if (micRecognition) {
+            try {
+                micRecognition.onend = null;
+                micRecognition.onerror = null;
+                micRecognition.onresult = null;
+                micRecognition.abort();
+            } catch(e) {}
+            micRecognition = null;
+        }
+        setTimeout(() => {
+            if (!micStarting) return;
+            micRecognition = new SR();
+            micRecognition.lang = 'he-IL';
+            micRecognition.continuous = false;
+            micRecognition.interimResults = false;
+            micRecognition.maxAlternatives = 1;
 
-        micRecognition.onstart = () => {
-            micListening = true;
-            document.getElementById('micBtn').classList.add('listening');
-            document.getElementById('micBtn').textContent = '⏹';
-            document.getElementById('micStatus').classList.add('show');
-            micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
-        };
-        micRecognition.onresult = (e) => {
-            clearTimeout(micTimer);
-            const transcript = cleanText(e.results[0][0].transcript);
-            document.getElementById('searchBox').value = transcript;
-            handleSearch();
-            stopMic();
-        };
-        micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
-        micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
-        micRecognition.start();
+            micRecognition.onstart = () => {
+                micStarting = false;
+                micListening = true;
+                document.getElementById('searchBox').value = '';
+                handleSearch();
+                document.getElementById('micBtn').classList.add('listening');
+                document.getElementById('micBtn').textContent = '⏹';
+                document.getElementById('micStatus').classList.add('show');
+                micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
+            };
+            micRecognition.onresult = (e) => {
+                clearTimeout(micTimer);
+                const transcript = cleanText(e.results[0][0].transcript);
+                document.getElementById('searchBox').value = transcript;
+                handleSearch();
+                stopMic();
+            };
+            micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
+            micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
+            try { micRecognition.start(); }
+            catch(e) { micStarting = false; stopMic(); }
+        }, 250);
     }
 
     function stopMic() {
+        micStarting = false;
         micListening = false;
         clearTimeout(micTimer);
         document.getElementById('micBtn').classList.remove('listening');
