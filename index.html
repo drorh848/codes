@@ -99,8 +99,8 @@
             text-align: right; outline: none;
         }
         .clear-btn {
-            position: absolute; left: 56px; top: 0; bottom: 0;
-            background: #dc3545; color: white; border-radius: 0; width: 46px;
+            position: absolute; left: 0; top: 0; bottom: 0;
+            background: #dc3545; color: white; border-radius: 10px 0 0 10px; width: 46px;
             display: none; justify-content: center; align-items: center;
             cursor: pointer; font-size: 22px; font-weight: bold; z-index: 5;
         }
@@ -168,9 +168,9 @@
             <span id="lastUpdate"></span>
         </div>
         <div class="search-wrapper">
+            <button class="mic-btn-user" id="micBtn" onclick="toggleMic()">🎤</button>
             <input type="text" class="search-box" id="search" placeholder="🔍 חפש רחוב..." oninput="handleSearch()">
             <div id="clearSearchBtn" class="clear-btn" onclick="clearSearch()">✕</div>
-            <button class="mic-btn-user" id="micBtn" onclick="toggleMic()">🎤</button>
         </div>
         <div class="mic-status-user" id="micStatus">🎙 מקשיב... (3 שניות)</div>
         <div id="count"></div>
@@ -534,6 +534,7 @@
     let micListening = false;
     let micTimer = null;
     let micStarting = false;
+    let micCollected = '';
 
     function toggleMic() {
         if (micListening || micStarting) { stopMic(); return; }
@@ -557,10 +558,12 @@
         // המתנה קצרה שנותנת לספארי לסגור את הסשן הקודם לפני פתיחת חדש
         setTimeout(() => {
             if (!micStarting) return; // בוטל בינתיים בלחיצה נוספת
+            micCollected = '';
             micRecognition = new SR();
             micRecognition.lang = 'he-IL';
             micRecognition.continuous = false;
-            micRecognition.interimResults = false;
+            // תוצאות ביניים — חובה: יש אייפונים שמחזירים תמלול רק בערוץ הזה
+            micRecognition.interimResults = true;
             micRecognition.maxAlternatives = 1;
 
             micRecognition.onstart = () => {
@@ -571,21 +574,46 @@
                 handleSearch();
                 document.getElementById('micBtn').classList.add('listening');
                 document.getElementById('micBtn').textContent = '⏹';
-                document.getElementById('micStatus').classList.add('show');
+                setMicStatus('🎙 מקשיב... (3 שניות)');
                 micTimer = setTimeout(() => { if (micListening) stopMic(); }, 3000);
             };
             micRecognition.onresult = (e) => {
                 clearTimeout(micTimer);
-                const transcript = cleanText(e.results[0][0].transcript);
-                document.getElementById('search').value = transcript;
+                // איסוף כל התמלול — כולל תוצאות ביניים
+                let txt = '';
+                for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+                micCollected = txt;
+                // תצוגה חיה בשדה החיפוש
+                document.getElementById('search').value = cleanText(micCollected);
                 handleSearch();
-                stopMic();
+                if (e.results[e.results.length - 1].isFinal) { stopMic(); return; }
+                // עדיין מדבר — הארכת ההקשבה בעוד 2 שניות
+                micTimer = setTimeout(() => { if (micListening) stopMic(); }, 2000);
             };
             micRecognition.onerror = () => { clearTimeout(micTimer); stopMic(); };
-            micRecognition.onend = () => { clearTimeout(micTimer); stopMic(); };
+            micRecognition.onend = () => {
+                clearTimeout(micTimer);
+                const finalText = cleanText(micCollected);
+                if (finalText) {
+                    document.getElementById('search').value = finalText;
+                    handleSearch();
+                    stopMic();
+                } else {
+                    // הסתיים בלי שום תמלול — הודעה במקום שקט
+                    stopMic();
+                    setMicStatus('🎤 לא נקלט דיבור — נסה שוב, או בדוק שההכתבה פעילה בהגדרות', 4000);
+                }
+            };
             try { micRecognition.start(); }
             catch(e) { micStarting = false; stopMic(); }
         }, 250);
+    }
+
+    function setMicStatus(text, hideAfterMs) {
+        const el = document.getElementById('micStatus');
+        el.textContent = text;
+        el.classList.add('show');
+        if (hideAfterMs) setTimeout(() => { el.classList.remove('show'); }, hideAfterMs);
     }
 
     function stopMic() {
