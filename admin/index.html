@@ -309,7 +309,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v4'; // לקדם בכל עדכון
+    const APP_VERSION = 'v5'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -333,30 +333,35 @@
     }
 
     function playDing() {
-        // ביפר: 4 צפצופים חדים בשני טונים מתחלפים, עוצמה מלאה
+        // ביפר: 3 מחזורים של 4 צפצופים חדים, הפסקה קצרה בין מחזורים (~5 שניות סה"כ)
         try {
             const ctx = window._audioCtx || (window._audioCtx = new (window.AudioContext || window.webkitAudioContext)());
             if (ctx.state === 'suspended') ctx.resume();
-            const beeps = [
-                { f: 1400, t: 0.00 },
-                { f: 1800, t: 0.28 },
-                { f: 1400, t: 0.56 },
-                { f: 1800, t: 0.84 }
-            ];
-            beeps.forEach((b) => {
-                const o = ctx.createOscillator(), g = ctx.createGain();
-                o.type = 'square'; // גל מרובע — חד וחודר יותר מסינוס
-                o.connect(g); g.connect(ctx.destination);
-                o.frequency.value = b.f;
-                const start = ctx.currentTime + b.t;
-                g.gain.setValueAtTime(0.9, start);
-                g.gain.setValueAtTime(0.9, start + 0.18);
-                g.gain.exponentialRampToValueAtTime(0.001, start + 0.24);
-                o.start(start); o.stop(start + 0.25);
-            });
+            const CYCLE = 1.8; // אורך מחזור כולל הפסקה
+            for (let cycle = 0; cycle < 3; cycle++) {
+                const base = cycle * CYCLE;
+                [
+                    { f: 1400, t: 0.00 },
+                    { f: 1800, t: 0.28 },
+                    { f: 1400, t: 0.56 },
+                    { f: 1800, t: 0.84 }
+                ].forEach((b) => {
+                    const o = ctx.createOscillator(), g = ctx.createGain();
+                    o.type = 'square'; // גל מרובע — חד וחודר
+                    o.connect(g); g.connect(ctx.destination);
+                    o.frequency.value = b.f;
+                    const start = ctx.currentTime + base + b.t;
+                    g.gain.setValueAtTime(0.9, start);
+                    g.gain.setValueAtTime(0.9, start + 0.18);
+                    g.gain.exponentialRampToValueAtTime(0.001, start + 0.24);
+                    o.start(start); o.stop(start + 0.25);
+                });
+            }
         } catch(e) {}
-        // רטט חזק: שלושה זמזומים ארוכים
-        try { if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]); } catch(e) {}
+        // רטט מקביל לכל אורך שלושת המחזורים
+        try {
+            if (navigator.vibrate) navigator.vibrate([400, 150, 400, 850, 400, 150, 400, 850, 400, 150, 400]);
+        } catch(e) {}
     }
 
     function notifySystem(title, body) {
