@@ -309,6 +309,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
+    const APP_VERSION = 'v3'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -494,7 +495,7 @@
 
     function setSyncInfo() {
         document.getElementById('syncInfo').innerText =
-            db.length + ' כתובות במאגר · מוצפן ומסונכרן ☁️';
+            db.length + ' כתובות במאגר · מוצפן ומסונכרן ☁️ · ' + APP_VERSION;
     }
 
     // שמירה לענן — הצפנה ואז כתיבה
