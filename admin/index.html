@@ -309,7 +309,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v3'; // לקדם בכל עדכון
+    const APP_VERSION = 'v4'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -333,17 +333,30 @@
     }
 
     function playDing() {
+        // ביפר: 4 צפצופים חדים בשני טונים מתחלפים, עוצמה מלאה
         try {
             const ctx = window._audioCtx || (window._audioCtx = new (window.AudioContext || window.webkitAudioContext)());
             if (ctx.state === 'suspended') ctx.resume();
-            const o = ctx.createOscillator(), g = ctx.createGain();
-            o.connect(g); g.connect(ctx.destination);
-            o.frequency.value = 880;
-            g.gain.setValueAtTime(0.15, ctx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-            o.start(); o.stop(ctx.currentTime + 0.5);
+            const beeps = [
+                { f: 1400, t: 0.00 },
+                { f: 1800, t: 0.28 },
+                { f: 1400, t: 0.56 },
+                { f: 1800, t: 0.84 }
+            ];
+            beeps.forEach((b) => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.type = 'square'; // גל מרובע — חד וחודר יותר מסינוס
+                o.connect(g); g.connect(ctx.destination);
+                o.frequency.value = b.f;
+                const start = ctx.currentTime + b.t;
+                g.gain.setValueAtTime(0.9, start);
+                g.gain.setValueAtTime(0.9, start + 0.18);
+                g.gain.exponentialRampToValueAtTime(0.001, start + 0.24);
+                o.start(start); o.stop(start + 0.25);
+            });
         } catch(e) {}
-        try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch(e) {}
+        // רטט חזק: שלושה זמזומים ארוכים
+        try { if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]); } catch(e) {}
     }
 
     function notifySystem(title, body) {
