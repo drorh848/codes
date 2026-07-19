@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>מנהל קודים — אדמין</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="מנהל">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <style>
         * { box-sizing: border-box; }
         html, body {
@@ -219,10 +224,14 @@
         <div class="security-box">
             <div class="lamps-row">
                 <button class="lamp" id="lampOnline" onclick="toggleAcc('devices')">🟢 <span id="onlineNum">0</span> מחוברים <span class="lamp-arrow">▼</span></button>
-                <button class="lamp" id="lampRequests" onclick="toggleAcc('requests')">🔔 <span id="reqNum">0</span> בקשות (24ש') <span class="lamp-arrow">▼</span></button>
+                <button class="lamp" id="lampRequests" onclick="toggleAcc('requests')">🔔 <span id="reqNum">0</span> בקשות <span class="lamp-arrow">▼</span></button>
+                <button class="lamp" id="lampSuggestions" onclick="toggleAcc('suggestions')">📝 <span id="sugNum">0</span> הצעות <span class="lamp-arrow">▼</span></button>
             </div>
             <div class="accordion" id="accRequests">
                 <div class="requests-area" id="requestsArea"></div>
+            </div>
+            <div class="accordion" id="accSuggestions">
+                <div id="suggestionsArea"></div>
             </div>
             <div class="accordion" id="accDevices">
                 <div class="devices-list" id="devicesList" style="display:block"></div>
@@ -307,7 +316,57 @@
     let devices = {};   // uid -> device
     let requests = {};  // uid -> request
     let statuses = {};  // uid -> {online, since, lastSeen}
+    let suggestionsData = {}; // uid -> {pushId -> suggestion}
     let suppressNextStreets = false;
+
+    // ── התראות: צליל, רטט, שורת התראות, מונה כותרת ──
+    let firstReqLoad = true, firstSugLoad = true;
+    let prevReqCount = 0, prevSugCount = 0;
+
+    function initNotifications() {
+        try {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        } catch(e) {}
+    }
+
+    function playDing() {
+        try {
+            const ctx = window._audioCtx || (window._audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+            if (ctx.state === 'suspended') ctx.resume();
+            const o = ctx.createOscillator(), g = ctx.createGain();
+            o.connect(g); g.connect(ctx.destination);
+            o.frequency.value = 880;
+            g.gain.setValueAtTime(0.15, ctx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+            o.start(); o.stop(ctx.currentTime + 0.5);
+        } catch(e) {}
+        try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch(e) {}
+    }
+
+    function notifySystem(title, body) {
+        try {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            if (navigator.serviceWorker) {
+                navigator.serviceWorker.ready.then((reg) => {
+                    reg.showNotification(title, { body: body, icon: 'icon-192.png', badge: 'icon-192.png', dir: 'rtl', lang: 'he' });
+                }).catch(() => { try { new Notification(title, { body: body }); } catch(e) {} });
+            } else {
+                new Notification(title, { body: body });
+            }
+        } catch(e) {}
+    }
+
+    function alertAdmin(title, body) {
+        playDing();
+        notifySystem(title, body);
+    }
+
+    function updateTitle() {
+        const total = prevReqCount + prevSugCount;
+        document.title = total > 0 ? '(' + total + ') מנהל קודים' : 'מנהל קודים — אדמין';
+    }
 
     const APPROVE_PIN = '5555';
     function askPin(action) {
@@ -341,24 +400,24 @@
         return model;
     }
 
-    // אקורדיונים — פתיחת אחד סוגרת את השני
+    // אקורדיונים — פתיחת אחד סוגרת את השאר
     function toggleAcc(which) {
-        const req = document.getElementById('accRequests');
-        const dev = document.getElementById('accDevices');
-        const lampR = document.getElementById('lampRequests');
-        const lampO = document.getElementById('lampOnline');
-        if (which === 'requests') {
-            const opening = !req.classList.contains('open');
-            req.classList.toggle('open', opening);
-            dev.classList.remove('open');
-            lampR.classList.toggle('open', opening);
-            lampO.classList.remove('open');
-        } else {
-            const opening = !dev.classList.contains('open');
-            dev.classList.toggle('open', opening);
-            req.classList.remove('open');
-            lampO.classList.toggle('open', opening);
-            lampR.classList.remove('open');
+        const map = {
+            requests: ['accRequests', 'lampRequests'],
+            devices: ['accDevices', 'lampOnline'],
+            suggestions: ['accSuggestions', 'lampSuggestions']
+        };
+        for (const k in map) {
+            const acc = document.getElementById(map[k][0]);
+            const lamp = document.getElementById(map[k][1]);
+            if (k === which) {
+                const opening = !acc.classList.contains('open');
+                acc.classList.toggle('open', opening);
+                lamp.classList.toggle('open', opening);
+            } else {
+                acc.classList.remove('open');
+                lamp.classList.remove('open');
+            }
         }
     }
 
@@ -466,6 +525,11 @@
             statuses = snap.val() || {};
             renderDevicesList();
         });
+        rtdb.ref('suggestions').on('value', (snap) => {
+            suggestionsData = snap.val() || {};
+            renderSuggestions();
+        });
+        initNotifications();
     }
 
     function renderRequests() {
@@ -484,6 +548,14 @@
         const recentCount = infos.filter(i => i.recent).length;
         document.getElementById('reqNum').textContent = recentCount;
         document.getElementById('lampRequests').classList.toggle('alert', recentCount > 0);
+
+        // התראה על בקשה חדשה (לא בטעינה הראשונה)
+        if (!firstReqLoad && keys.length > prevReqCount) {
+            alertAdmin('🔔 בקשת מכשיר חדשה', 'מכשיר חדש ממתין לאישור שלך');
+        }
+        firstReqLoad = false;
+        prevReqCount = keys.length;
+        updateTitle();
 
         if (!keys.length) {
             area.innerHTML = '<div class="devices-empty">אין בקשות ממתינות</div>';
@@ -504,13 +576,96 @@
         if (!askPin('אישור מכשיר חדש')) return;
         const r = requests[uid] || {};
         const nickname = prompt('שם/כינוי למכשיר (למשל: יוסי שליח):', friendlyModel(r.model) || '') || (friendlyModel(r.model) || 'ללא שם');
+        const isContrib = confirm('📝 לאפשר למכשיר הזה גם להציע קודים חדשים?\n(אישור = כן, ביטול = צופה רגיל)');
         rtdb.ref('devices/' + uid).set({
             nickname: nickname,
             model: r.model || '',
             shortId: r.shortId || '',
             approved: true,
+            role: isContrib ? 'contributor' : 'viewer',
             date: new Date().toLocaleDateString('he-IL')
         }).then(() => rtdb.ref('requests/' + uid).remove());
+    }
+
+    function toggleRole(uid) {
+        const d = devices[uid];
+        if (!d) return;
+        if (d.role === 'contributor') {
+            if (!confirm('לבטל ל"' + d.nickname + '" את האפשרות להציע קודים?')) return;
+            rtdb.ref('devices/' + uid + '/role').set('viewer');
+        } else {
+            if (!askPin('הפיכת "' + d.nickname + '" לתורם')) return;
+            rtdb.ref('devices/' + uid + '/role').set('contributor');
+        }
+    }
+
+    // ══════════════════════════════════════════
+    //  הצעות קודים מתורמים
+    // ══════════════════════════════════════════
+    function renderSuggestions() {
+        const area = document.getElementById('suggestionsArea');
+        // שיטוח: uid -> pushId -> item
+        const flat = [];
+        for (const uid in suggestionsData) {
+            for (const key in suggestionsData[uid]) {
+                flat.push({ uid: uid, key: key, item: suggestionsData[uid][key] });
+            }
+        }
+        flat.sort((a, b) => (b.item.ts || 0) - (a.item.ts || 0));
+
+        document.getElementById('sugNum').textContent = flat.length;
+        document.getElementById('lampSuggestions').classList.toggle('alert', flat.length > 0);
+
+        // התראה על הצעה חדשה (לא בטעינה הראשונה)
+        if (!firstSugLoad && flat.length > prevSugCount) {
+            alertAdmin('📝 הצעת קוד חדשה', 'שליח שלח קוד חדש לאישור');
+        }
+        firstSugLoad = false;
+        prevSugCount = flat.length;
+        updateTitle();
+
+        if (!flat.length) {
+            area.innerHTML = '<div class="devices-empty">אין הצעות ממתינות</div>';
+            return;
+        }
+        area.innerHTML = flat.map(({ uid, key, item }) => {
+            const who = (devices[uid] && devices[uid].nickname) ? devices[uid].nickname : 'לא ידוע';
+            return `<div class="request-item">
+                <div class="request-info">
+                    <div class="request-id">📝 ${item.street} ${item.number || ''}</div>
+                    <div style="color:#ffe27a;font-size:15px;font-weight:bold">${item.code}</div>
+                    <div class="request-meta">מאת: ${who} · ${item.date || ''}</div>
+                </div>
+                <button class="approve-btn" onclick="approveSuggestion('${uid}','${key}')">✅ הוסף</button>
+                <button class="reject-btn" onclick="rejectSuggestion('${uid}','${key}')">✕</button>
+            </div>`;
+        }).join('');
+    }
+
+    function approveSuggestion(uid, key) {
+        const item = (suggestionsData[uid] || {})[key];
+        if (!item) return;
+        const s = cleanText(item.street), n = cleanText(item.number || ''), c = cleanText(item.code);
+        // בדיקה אם הכתובת כבר קיימת
+        const idx = db.findIndex(x => cleanText(x.street) === s && cleanText(String(x.number || '')) === n);
+        if (idx > -1) {
+            if (db[idx].code === c) {
+                alert('הכתובת כבר קיימת עם אותו קוד — ההצעה תימחק');
+            } else {
+                if (!confirm('הכתובת קיימת!\nהקוד הנוכחי: ' + db[idx].code + '\nהקוד המוצע: ' + c + '\n\nלהחליף לקוד המוצע?')) return;
+                db[idx].code = c;
+                sortDB(); saveToCloud(); renderList();
+            }
+        } else {
+            db.push({ street: s, number: n, code: c });
+            sortDB(); saveToCloud(); renderList();
+        }
+        rtdb.ref('suggestions/' + uid + '/' + key).remove();
+    }
+
+    function rejectSuggestion(uid, key) {
+        if (!confirm('לדחות את ההצעה?')) return;
+        rtdb.ref('suggestions/' + uid + '/' + key).remove();
     }
 
     function rejectRequest(uid) {
@@ -537,6 +692,7 @@
         rtdb.ref('devices/' + uid).remove();
         rtdb.ref('status/' + uid).remove();
         rtdb.ref('sessions/' + uid).remove();
+        rtdb.ref('suggestions/' + uid).remove();
     }
 
     function editNickname(uid) {
@@ -600,13 +756,14 @@
             }
             return `<div class="device-item ${blocked ? 'blocked' : ''}">
                 <div class="device-info">
-                    <div class="device-name">📱 ${d.nickname} ${blocked ? '🚫 חסום' : ''}</div>
+                    <div class="device-name">📱 ${d.nickname} ${d.role === 'contributor' ? '📝' : ''} ${blocked ? '🚫 חסום' : ''}</div>
                     <div style="margin:2px 0">${presenceHtml}</div>
                     <div class="device-id-text">${d.shortId || ''} · ${d.model || ''}</div>
                     <div class="device-date">📅 אושר: ${d.date || ''}</div>
                 </div>
                 <div class="device-btns" style="flex-direction:column">
                     <button class="block-btn ${blocked ? 'unblock-btn' : ''}" onclick="toggleBlockDevice('${uid}')">${blocked ? '✅ שחרר' : '🚫 חסום'}</button>
+                    <button class="small-btn" onclick="toggleRole('${uid}')">${d.role === 'contributor' ? '📝 בטל תורם' : '📝 הפוך לתורם'}</button>
                     <button class="small-btn" onclick="openHistory('${uid}')">🕐 היסטוריה</button>
                     <button class="small-btn" onclick="editNickname('${uid}')">✏️ כינוי</button>
                     <button class="device-del-btn" onclick="deleteDevice('${uid}')">✕ מחק</button>
@@ -857,6 +1014,13 @@
         document.getElementById('micBtn').textContent = '🎤';
         document.getElementById('micStatus').classList.remove('show');
         if (micRecognition) { try { micRecognition.stop(); } catch(e){} micRecognition = null; }
+    }
+
+    // ── Service Worker (PWA) ──
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        });
     }
 
     // ── INIT ──
