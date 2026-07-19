@@ -164,7 +164,7 @@
     </div>
     <div class="header">
         <div class="sync-row">
-            <span id="syncStatus"><span class="sync-dot" id="syncDot"></span>מסונכרן</span>
+            <span id="syncStatus"><span class="sync-dot" id="syncDot"></span>מסונכרן <span id="appVer" style="color:#bbb;font-size:11px"></span></span>
             <span id="lastUpdate"></span>
         </div>
         <button id="suggestBtn" style="display:none; width:100%; background:#30d158; color:#fff; border:none; border-radius:10px; padding:11px; font-size:15px; font-weight:bold; margin-bottom:8px; cursor:pointer" onclick="openSuggest()">➕ הוסף קוד חדש</button>
@@ -198,6 +198,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
 
 <script>
+    // ══════════════════════════════════════════
+    //  גרסת אפליקציה — לקדם בכל עדכון!
+    // ══════════════════════════════════════════
+    const APP_VERSION = 'v3';
+
     // ══════════════════════════════════════════
     //  Firebase
     // ══════════════════════════════════════════
@@ -707,6 +712,9 @@
     // ══════════════════════════════════════════
     //  Service Worker
     // ══════════════════════════════════════════
+    // הצגת מספר הגרסה ליד חיווי הסנכרון
+    document.getElementById('appVer').textContent = '· ' + APP_VERSION;
+
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js').catch(() => {});
