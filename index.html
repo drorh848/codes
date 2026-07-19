@@ -167,6 +167,7 @@
             <span id="syncStatus"><span class="sync-dot" id="syncDot"></span>מסונכרן</span>
             <span id="lastUpdate"></span>
         </div>
+        <button id="suggestBtn" style="display:none; width:100%; background:#30d158; color:#fff; border:none; border-radius:10px; padding:11px; font-size:15px; font-weight:bold; margin-bottom:8px; cursor:pointer" onclick="openSuggest()">➕ הוסף קוד חדש</button>
         <div class="search-wrapper">
             <button class="mic-btn-user" id="micBtn" onclick="toggleMic()">🎤</button>
             <input type="text" class="search-box" id="search" placeholder="🔍 חפש רחוב..." oninput="handleSearch()">
@@ -176,6 +177,18 @@
         <div id="count"></div>
     </div>
     <div class="list-area" id="list"></div>
+</div>
+
+<!-- מודל הוספת קוד (לתורמים) -->
+<div id="suggestModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:200; justify-content:center; align-items:center;">
+    <div style="background:#fff; width:88%; max-width:380px; border-radius:15px; padding:20px; text-align:center;">
+        <h3 style="margin-top:0">➕ הוסף קוד חדש</h3>
+        <input id="sgStreet" placeholder="שם רחוב" style="width:100%;padding:11px;margin-bottom:8px;border:1px solid #ccc;border-radius:8px;font-size:16px;box-sizing:border-box">
+        <input id="sgNum" placeholder="מספר בניין" style="width:100%;padding:11px;margin-bottom:8px;border:1px solid #ccc;border-radius:8px;font-size:16px;box-sizing:border-box">
+        <input id="sgCode" placeholder="קוד (כולל # או פעמון אם צריך)" style="width:100%;padding:11px;margin-bottom:12px;border:2px solid #007aff;border-radius:8px;font-size:16px;font-weight:bold;box-sizing:border-box">
+        <button onclick="sendSuggestion()" style="width:100%;background:#30d158;color:#fff;border:none;border-radius:10px;padding:12px;font-size:16px;font-weight:bold;margin-bottom:8px;cursor:pointer">📤 שלח</button>
+        <button onclick="closeSuggest()" style="width:100%;background:#ff3b30;color:#fff;border:none;border-radius:10px;padding:12px;font-size:16px;font-weight:bold;cursor:pointer">ביטול</button>
+    </div>
 </div>
 
 <!-- Firebase compat SDK -->
@@ -318,6 +331,9 @@
                 localStorage.setItem('approvedCache', 'true');
                 startApprovedFlow();
                 startPresence();
+                // כפתור הוספת קוד — רק למכשיר עם תפקיד תורם
+                document.getElementById('suggestBtn').style.display =
+                    (dev.role === 'contributor') ? 'block' : 'none';
             } else if (dev && dev.approved === false) {
                 // נחסם — נקה הכול
                 stopPresence();
@@ -456,6 +472,34 @@
                 currentSessionRef = null;
             }
         } catch(e) {}
+    }
+
+    // ══════════════════════════════════════════
+    //  הוספת קוד חדש (תורמים בלבד)
+    // ══════════════════════════════════════════
+    function openSuggest() {
+        document.getElementById('sgStreet').value = '';
+        document.getElementById('sgNum').value = '';
+        document.getElementById('sgCode').value = '';
+        document.getElementById('suggestModal').style.display = 'flex';
+    }
+    function closeSuggest() {
+        document.getElementById('suggestModal').style.display = 'none';
+    }
+    function sendSuggestion() {
+        const s = cleanText(document.getElementById('sgStreet').value);
+        const n = cleanText(document.getElementById('sgNum').value);
+        const c = cleanText(document.getElementById('sgCode').value);
+        if (!s || !c) return alert('חסר שם רחוב או קוד');
+        if (!rtdb || !myUid) return alert('אין חיבור לאינטרנט — נסה שוב כשיש רשת');
+        rtdb.ref('suggestions/' + myUid).push({
+            street: s, number: n, code: c,
+            date: new Date().toLocaleString('he-IL'),
+            ts: firebase.database.ServerValue.TIMESTAMP
+        }).then(() => {
+            closeSuggest();
+            alert('✅ הקוד נשלח!\nהשרת ייקלוט אותו ויתעדכן אצל כולם תוך מספר דקות.');
+        }).catch(() => alert('שגיאה בשליחה — בדוק את החיבור ונסה שוב'));
     }
 
     // ══════════════════════════════════════════
