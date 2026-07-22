@@ -310,7 +310,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v6'; // לקדם בכל עדכון
+    const APP_VERSION = 'v7'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -1062,6 +1062,46 @@
         document.getElementById('micStatus').classList.remove('show');
         if (micRecognition) { try { micRecognition.stop(); } catch(e){} micRecognition = null; }
     }
+
+    // ══════════════════════════════════════════
+    //  עדכון אוטומטי: בדיקת גרסה מול השרת + באנר
+    // ══════════════════════════════════════════
+    function checkForUpdate() {
+        fetch('index.html?check=' + Date.now(), { cache: 'no-store' })
+            .then(r => r.text())
+            .then(txt => {
+                const m = txt.match(/APP_VERSION = '(v\d+)'/);
+                if (m && m[1] !== APP_VERSION) showUpdateBanner(m[1]);
+            }).catch(() => {});
+    }
+    function showUpdateBanner(newVer) {
+        if (document.getElementById('updateBanner')) return;
+        const b = document.createElement('div');
+        b.id = 'updateBanner';
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e67e22;color:#fff;text-align:center;padding:13px;font-weight:bold;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.35)';
+        b.textContent = '🔄 גרסה חדשה (' + newVer + ') זמינה — לחץ כאן לעדכון';
+        b.onclick = applyUpdate;
+        document.body.appendChild(b);
+    }
+    function applyUpdate() {
+        const banner = document.getElementById('updateBanner');
+        if (banner) banner.textContent = '⏳ מעדכן...';
+        if (!('caches' in window)) { location.reload(); return; }
+        fetch('index.html?fresh=' + Date.now(), { cache: 'no-store' })
+            .then(r => {
+                if (!r.ok) throw 0;
+                return caches.keys().then(names => Promise.all(names.map(n =>
+                    caches.open(n).then(c => Promise.all([
+                        c.put('./index.html', r.clone()),
+                        c.put('./', r.clone())
+                    ]))
+                )));
+            })
+            .then(() => location.reload())
+            .catch(() => location.reload());
+    }
+    setTimeout(checkForUpdate, 4000);
+    setInterval(checkForUpdate, 10 * 60 * 1000);
 
     // ── Service Worker (PWA) ──
     if ('serviceWorker' in navigator) {
