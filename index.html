@@ -201,7 +201,7 @@
     // ══════════════════════════════════════════
     //  גרסת אפליקציה — לקדם בכל עדכון!
     // ══════════════════════════════════════════
-    const APP_VERSION = 'v5';
+    const APP_VERSION = 'v6';
 
     // ══════════════════════════════════════════
     //  Firebase
@@ -513,7 +513,7 @@
         }).catch(() => alert('שגיאה בשליחה — בדוק את החיבור ונסה שוב'));
     }
 
-    // ── שמירה ישירה של עורך: משיכת מאגר טרי, בדיקת קיים, גיבוי, כתיבה ──
+    // ── שמירה ישירה של עורך: משיכת מאגר טרי, בדיקת קיים, גיבוי, כתיבה, יומן ──
     function editorDirectSave(s, n, c) {
         if (!encKey) return alert('אין חיבור מאובטח — נסה שוב בעוד רגע');
         rtdb.ref('streets').once('value').then((snap) => {
@@ -529,6 +529,8 @@
             }
             const idx = fresh.findIndex(x =>
                 cleanText(x.street) === s && cleanText(String(x.number || '')) === n);
+            let action = 'add';
+            let oldCode = '';
             if (idx > -1) {
                 if (cleanText(fresh[idx].code) === c) {
                     return alert('הכתובת הזו כבר קיימת עם אותו קוד — אין מה לעדכן');
@@ -537,6 +539,8 @@
                     '\nהקוד הרשום כרגע: ' + fresh[idx].code +
                     '\nהקוד החדש שלך: ' + c +
                     '\n\nלהחליף לקוד החדש?')) return;
+                action = 'update';
+                oldCode = fresh[idx].code;
                 fresh[idx].code = c;
             } else {
                 fresh.push({ street: s, number: n, code: c });
@@ -545,18 +549,27 @@
                 const st = a.street.localeCompare(b.street);
                 return st !== 0 ? st : parseInt(a.number) - parseInt(b.number);
             });
-            // גיבוי אוטומטי של המצב הקודם לפני הכתיבה
+            const nowStr = new Date().toLocaleString('he-IL');
+            const who = myNickname || myShortId;
+            // גיבוי אוטומטי של המצב הקודם — נוסף לרשימת הגיבויים
             const backupP = oldBlob
-                ? rtdb.ref('backup').set({
-                    blob: oldBlob,
-                    date: new Date().toLocaleString('he-IL'),
-                    by: myNickname || myShortId
+                ? rtdb.ref('backup').push({
+                    blob: oldBlob, date: nowStr, by: who,
+                    ts: firebase.database.ServerValue.TIMESTAMP
                   })
                 : Promise.resolve();
             backupP.then(() => {
                 const newBlob = CryptoJS.AES.encrypt(JSON.stringify(fresh), encKey).toString();
                 return rtdb.ref('streets').set(newBlob);
             }).then(() => {
+                // רישום ביומן הפעילות — כולל הקוד הישן והחדש
+                rtdb.ref('activity').push({
+                    action: action,
+                    street: s, number: n,
+                    oldCode: oldCode, newCode: c,
+                    by: who, date: nowStr,
+                    ts: firebase.database.ServerValue.TIMESTAMP
+                }).catch(() => {});
                 closeSuggest();
                 alert('✅ נשמר ועודכן אצל כולם!');
             }).catch(() => alert('שגיאה בשמירה — נסה שוב'));
