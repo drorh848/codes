@@ -248,8 +248,9 @@
         <button class="btn-add" id="mainBtn" onclick="handleFormSubmit()">➕ הוסף</button>
         <button id="cancelBtn" onclick="resetForm()" style="background:#6c757d; width:100%; margin-bottom:5px; display:none;">ביטול עריכה</button>
         <div class="utility-btns">
-            <button class="btn-import" onclick="openImportModal()">📥 ייבא נתונים</button>
+            <button class="btn-import" onclick="openImportModal()">📥 ייבא</button>
             <button class="btn-backup" onclick="backupAll()">💾 גיבוי לקובץ</button>
+            <button style="background:#d35400; flex:1; font-size:14px" onclick="restoreCloudBackup()">↩️ שחזור ענן</button>
         </div>
 
         <!-- SEARCH + MIC -->
@@ -309,7 +310,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v5'; // לקדם בכל עדכון
+    const APP_VERSION = 'v6'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -609,13 +610,17 @@
     function toggleRole(uid) {
         const d = devices[uid];
         if (!d) return;
-        if (d.role === 'contributor') {
-            if (!confirm('לבטל ל"' + d.nickname + '" את האפשרות להציע קודים?')) return;
-            rtdb.ref('devices/' + uid + '/role').set('viewer');
+        const cur = d.role === 'editor' ? 'editor' : (d.role === 'contributor' ? 'contributor' : 'viewer');
+        let next, label;
+        if (cur === 'viewer') { next = 'contributor'; label = '📝 תורם — מציע קודים שמחכים לאישורך'; }
+        else if (cur === 'contributor') { next = 'editor'; label = '✏️ עורך — מוסיף ומעדכן קודים ישירות אצל כולם!'; }
+        else { next = 'viewer'; label = '👁 צופה רגיל'; }
+        if (next === 'viewer') {
+            if (!confirm('להחזיר את "' + d.nickname + '" לצופה רגיל?')) return;
         } else {
-            if (!askPin('הפיכת "' + d.nickname + '" לתורם')) return;
-            rtdb.ref('devices/' + uid + '/role').set('contributor');
+            if (!askPin('שינוי תפקיד של "' + d.nickname + '" ל:\n' + label)) return;
         }
+        rtdb.ref('devices/' + uid + '/role').set(next);
     }
 
     // ══════════════════════════════════════════
@@ -773,16 +778,17 @@
             } else {
                 presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">לא התחבר עדיין</span>`;
             }
+            const roleTag = d.role === 'editor' ? '✏️' : (d.role === 'contributor' ? '📝' : '');
             return `<div class="device-item ${blocked ? 'blocked' : ''}">
                 <div class="device-info">
-                    <div class="device-name">📱 ${d.nickname} ${d.role === 'contributor' ? '📝' : ''} ${blocked ? '🚫 חסום' : ''}</div>
+                    <div class="device-name">📱 ${d.nickname} ${roleTag} ${blocked ? '🚫 חסום' : ''}</div>
                     <div style="margin:2px 0">${presenceHtml}</div>
                     <div class="device-id-text">${d.shortId || ''} · ${d.model || ''}</div>
                     <div class="device-date">📅 אושר: ${d.date || ''}</div>
                 </div>
                 <div class="device-btns" style="flex-direction:column">
                     <button class="block-btn ${blocked ? 'unblock-btn' : ''}" onclick="toggleBlockDevice('${uid}')">${blocked ? '✅ שחרר' : '🚫 חסום'}</button>
-                    <button class="small-btn" onclick="toggleRole('${uid}')">${d.role === 'contributor' ? '📝 בטל תורם' : '📝 הפוך לתורם'}</button>
+                    <button class="small-btn" onclick="toggleRole('${uid}')">🔁 תפקיד: ${d.role === 'editor' ? 'עורך' : (d.role === 'contributor' ? 'תורם' : 'צופה')}</button>
                     <button class="small-btn" onclick="openHistory('${uid}')">🕐 היסטוריה</button>
                     <button class="small-btn" onclick="editNickname('${uid}')">✏️ כינוי</button>
                     <button class="device-del-btn" onclick="deleteDevice('${uid}')">✕ מחק</button>
@@ -945,6 +951,28 @@
                 } else alert('פורמט לא תקין');
             } catch(e) { alert('שגיאה בהדבקה'); }
         };
+    }
+
+    // ══════════════════════════════════════════
+    //  שחזור גיבוי ענן (נוצר אוטומטית לפני כל כתיבה של עורך)
+    // ══════════════════════════════════════════
+    function restoreCloudBackup() {
+        if (!askPin('שחזור גיבוי ענן')) return;
+        rtdb.ref('backup').once('value').then((snap) => {
+            const b = snap.val();
+            if (!b || !b.blob) return alert('אין גיבוי ענן עדיין\n(נוצר אוטומטית לפני כל שמירה של עורך)');
+            let arr;
+            try {
+                arr = JSON.parse(CryptoJS.AES.decrypt(b.blob, encKey).toString(CryptoJS.enc.Utf8));
+            } catch(e) { return alert('שגיאה בפענוח הגיבוי'); }
+            if (!Array.isArray(arr)) return alert('גיבוי לא תקין');
+            if (!confirm('לשחזר ' + arr.length + ' כתובות?\n' +
+                'הגיבוי נשמר: ' + (b.date || '') + '\n' +
+                'לפני עדכון של: ' + (b.by || 'לא ידוע') + '\n\n' +
+                '⚠️ זה יחליף את המאגר הנוכחי!')) return;
+            db = arr; sortDB(); saveToCloud(); renderList();
+            alert('✅ שוחזר בהצלחה!');
+        }).catch(() => alert('שגיאה בגישה לגיבוי'));
     }
 
     // ══════════════════════════════════════════
