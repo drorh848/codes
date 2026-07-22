@@ -250,7 +250,10 @@
         <div class="utility-btns">
             <button class="btn-import" onclick="openImportModal()">📥 ייבא</button>
             <button class="btn-backup" onclick="backupAll()">💾 גיבוי לקובץ</button>
+        </div>
+        <div class="utility-btns">
             <button style="background:#d35400; flex:1; font-size:14px" onclick="restoreCloudBackup()">↩️ שחזור ענן</button>
+            <button style="background:#16a085; flex:1; font-size:14px" onclick="openActivityLog()">📋 יומן פעילות</button>
         </div>
 
         <!-- SEARCH + MIC -->
@@ -310,7 +313,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v7'; // לקדם בכל עדכון
+    const APP_VERSION = 'v8'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -549,6 +552,8 @@
             suggestionsData = snap.val() || {};
             renderSuggestions();
         });
+        subscribeActivity();
+        trimBackups();
         initNotifications();
     }
 
@@ -954,25 +959,101 @@
     }
 
     // ══════════════════════════════════════════
-    //  שחזור גיבוי ענן (נוצר אוטומטית לפני כל כתיבה של עורך)
+    //  שחזור מרשימת גיבויי ענן (עד 10, נוצרים לפני כל כתיבת עורך)
     // ══════════════════════════════════════════
+    let backupsData = {};
+
     function restoreCloudBackup() {
         if (!askPin('שחזור גיבוי ענן')) return;
         rtdb.ref('backup').once('value').then((snap) => {
-            const b = snap.val();
-            if (!b || !b.blob) return alert('אין גיבוי ענן עדיין\n(נוצר אוטומטית לפני כל שמירה של עורך)');
+            const raw = snap.val();
+            if (!raw) return alert('אין גיבויי ענן עדיין\n(נוצרים אוטומטית לפני כל שמירה של עורך)');
+            // תמיכה גם בפורמט ישן (גיבוי בודד) וגם ברשימה
+            let list = [];
+            if (raw.blob) {
+                list = [{ key: null, blob: raw.blob, date: raw.date, by: raw.by, ts: 0 }];
+            } else {
+                for (const k in raw) list.push({ key: k, blob: raw[k].blob, date: raw[k].date, by: raw[k].by, ts: raw[k].ts || 0 });
+                list.sort((a, b) => b.ts - a.ts); // חדש ראשון
+            }
+            if (!list.length) return alert('אין גיבויים');
+            const menu = list.map((b, i) =>
+                (i + 1) + '. ' + (b.date || '?') + ' (לפני עדכון של: ' + (b.by || '?') + ')').join('\n');
+            const pick = prompt('בחר מספר גיבוי לשחזור:\n\n' + menu, '1');
+            if (pick === null) return;
+            const i = parseInt(pick) - 1;
+            if (isNaN(i) || i < 0 || i >= list.length) return alert('מספר לא תקין');
+            const chosen = list[i];
             let arr;
             try {
-                arr = JSON.parse(CryptoJS.AES.decrypt(b.blob, encKey).toString(CryptoJS.enc.Utf8));
+                arr = JSON.parse(CryptoJS.AES.decrypt(chosen.blob, encKey).toString(CryptoJS.enc.Utf8));
             } catch(e) { return alert('שגיאה בפענוח הגיבוי'); }
             if (!Array.isArray(arr)) return alert('גיבוי לא תקין');
-            if (!confirm('לשחזר ' + arr.length + ' כתובות?\n' +
-                'הגיבוי נשמר: ' + (b.date || '') + '\n' +
-                'לפני עדכון של: ' + (b.by || 'לא ידוע') + '\n\n' +
-                '⚠️ זה יחליף את המאגר הנוכחי!')) return;
+            if (!confirm('לשחזר ' + arr.length + ' כתובות מגיבוי:\n' + (chosen.date || '') +
+                ' (לפני עדכון של: ' + (chosen.by || '?') + ')\n\n⚠️ זה יחליף את המאגר הנוכחי!')) return;
             db = arr; sortDB(); saveToCloud(); renderList();
             alert('✅ שוחזר בהצלחה!');
-        }).catch(() => alert('שגיאה בגישה לגיבוי'));
+        }).catch(() => alert('שגיאה בגישה לגיבויים'));
+    }
+
+    // שמירת 10 גיבויים אחרונים בלבד (ניקוי בצד האדמין)
+    function trimBackups() {
+        rtdb.ref('backup').once('value').then((snap) => {
+            const raw = snap.val();
+            if (!raw || raw.blob) return; // ריק או פורמט ישן — אין מה לנקות
+            const keys = Object.keys(raw).sort((a, b) => (raw[a].ts || 0) - (raw[b].ts || 0));
+            while (keys.length > 10) rtdb.ref('backup/' + keys.shift()).remove();
+        }).catch(() => {});
+    }
+
+    // ══════════════════════════════════════════
+    //  יומן פעילות עורכים
+    // ══════════════════════════════════════════
+    let activityData = {};
+    let firstActLoad = true;
+    let prevActCount = 0;
+
+    function subscribeActivity() {
+        rtdb.ref('activity').on('value', (snap) => {
+            activityData = snap.val() || {};
+            const keys = Object.keys(activityData);
+            // התראה על פעולה חדשה של עורך (לא בטעינה הראשונה)
+            if (!firstActLoad && keys.length > prevActCount) {
+                const newest = keys.map(k => activityData[k]).sort((a, b) => (b.ts || 0) - (a.ts || 0))[0];
+                if (newest) {
+                    const desc = newest.action === 'update'
+                        ? newest.by + ' עדכן: ' + newest.street + ' ' + (newest.number || '') + ' (מ-' + newest.oldCode + ' ל-' + newest.newCode + ')'
+                        : newest.by + ' הוסיף: ' + newest.street + ' ' + (newest.number || '') + ' — קוד ' + newest.newCode;
+                    alertAdmin('✏️ עדכון מהשטח', desc);
+                }
+            }
+            firstActLoad = false;
+            prevActCount = keys.length;
+            // ניקוי ל-50 רשומות אחרונות
+            if (keys.length > 50) {
+                const sorted = keys.sort((a, b) => (activityData[a].ts || 0) - (activityData[b].ts || 0));
+                while (sorted.length > 50) rtdb.ref('activity/' + sorted.shift()).remove();
+            }
+        });
+    }
+
+    function openActivityLog() {
+        document.getElementById('historyTitle').innerText = '📋 יומן פעילות עורכים';
+        const listEl = document.getElementById('historyList');
+        const keys = Object.keys(activityData);
+        document.getElementById('historyOverlay').style.display = 'flex';
+        if (!keys.length) { listEl.innerHTML = '<div style="color:gray">אין פעילות עדיין</div>'; return; }
+        const entries = keys.map(k => activityData[k]).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        listEl.innerHTML = entries.map(e => {
+            if (e.action === 'update') {
+                return `<div class="history-item">✏️ <b>${e.by}</b> עדכן: ${e.street} ${e.number || ''}<br>
+                    הקוד שונה מ-<b style="color:#c0392b">${e.oldCode}</b> ל-<b style="color:#28a745">${e.newCode}</b><br>
+                    <span style="color:#888;font-size:11px">${e.date || ''}</span></div>`;
+            }
+            return `<div class="history-item">➕ <b>${e.by}</b> הוסיף: ${e.street} ${e.number || ''}<br>
+                קוד: <b style="color:#28a745">${e.newCode}</b><br>
+                <span style="color:#888;font-size:11px">${e.date || ''}</span></div>`;
+        }).join('');
     }
 
     // ══════════════════════════════════════════
