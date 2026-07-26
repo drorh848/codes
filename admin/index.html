@@ -223,7 +223,7 @@
         <!-- ניהול מכשירים -->
         <div class="security-box">
             <div class="lamps-row">
-                <button class="lamp" id="lampOnline" onclick="toggleAcc('devices')">🟢 <span id="onlineNum">0</span> מחוברים <span class="lamp-arrow">▼</span></button>
+                <button class="lamp" id="lampOnline" onclick="toggleAcc('devices')">🟢 <span id="onlineNum">0</span> פעילים <span class="lamp-arrow">▼</span></button>
                 <button class="lamp" id="lampRequests" onclick="toggleAcc('requests')">🔔 <span id="reqNum">0</span> בקשות <span class="lamp-arrow">▼</span></button>
                 <button class="lamp" id="lampSuggestions" onclick="toggleAcc('suggestions')">📝 <span id="sugNum">0</span> הצעות <span class="lamp-arrow">▼</span></button>
             </div>
@@ -313,7 +313,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v8'; // לקדם בכל עדכון
+    const APP_VERSION = 'v9'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -746,7 +746,7 @@
                 const s = sessions[k];
                 const start = fmtTs(s.start);
                 const end = s.end ? fmtTs(s.end) : null;
-                return `<div class="history-item"><b>${start}</b> ← ${end ? end : '<span class="live">מחובר עכשיו 🟢</span>'}</div>`;
+                return `<div class="history-item"><b>${start}</b> ← ${end ? end : '<span class="live">פעיל עכשיו 🟢</span>'}</div>`;
             }).join('');
         });
     }
@@ -777,11 +777,11 @@
             const online = st.online === true;
             let presenceHtml;
             if (online) {
-                presenceHtml = `<span class="presence-dot"></span> <span class="presence-text">מחובר${st.since ? ' מ-' + fmtTs(st.since) : ''}</span>`;
+                presenceHtml = `<span class="presence-dot"></span> <span class="presence-text">פעיל עכשיו${st.since ? ' · מ-' + fmtTs(st.since) : ''}</span>`;
             } else if (st.lastSeen) {
-                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">נראה לאחרונה: ${fmtTs(st.lastSeen)}</span>`;
+                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">פעיל לאחרונה: ${fmtTs(st.lastSeen)}</span>`;
             } else {
-                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">לא התחבר עדיין</span>`;
+                presenceHtml = `<span class="presence-dot off"></span> <span class="presence-text off">טרם השתמש</span>`;
             }
             const roleTag = d.role === 'editor' ? '✏️' : (d.role === 'contributor' ? '📝' : '');
             return `<div class="device-item ${blocked ? 'blocked' : ''}">
@@ -1147,12 +1147,15 @@
     // ══════════════════════════════════════════
     //  עדכון אוטומטי: בדיקת גרסה מול השרת + באנר
     // ══════════════════════════════════════════
-    function checkForUpdate() {
+    function checkForUpdate(auto) {
         fetch('index.html?check=' + Date.now(), { cache: 'no-store' })
             .then(r => r.text())
             .then(txt => {
                 const m = txt.match(/APP_VERSION = '(v\d+)'/);
-                if (m && m[1] !== APP_VERSION) showUpdateBanner(m[1]);
+                if (m && m[1] !== APP_VERSION) {
+                    // בפתיחה — עדכון כפוי מיידי; תוך כדי עבודה — באנר ללחיצה
+                    if (auto) applyUpdate(); else showUpdateBanner(m[1]);
+                }
             }).catch(() => {});
     }
     function showUpdateBanner(newVer) {
@@ -1181,8 +1184,8 @@
             .then(() => location.reload())
             .catch(() => location.reload());
     }
-    setTimeout(checkForUpdate, 4000);
-    setInterval(checkForUpdate, 10 * 60 * 1000);
+    setTimeout(() => checkForUpdate(true), 4000);
+    setInterval(() => checkForUpdate(false), 10 * 60 * 1000);
 
     // ── Service Worker (PWA) ──
     if ('serviceWorker' in navigator) {
