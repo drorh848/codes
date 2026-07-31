@@ -201,7 +201,7 @@
     // ══════════════════════════════════════════
     //  גרסת אפליקציה — לקדם בכל עדכון!
     // ══════════════════════════════════════════
-    const APP_VERSION = 'v7';
+    const APP_VERSION = 'v8';
 
     // ══════════════════════════════════════════
     //  Firebase
@@ -599,10 +599,7 @@
             } else {
                 fresh.push({ street: s, number: n, code: c });
             }
-            fresh.sort((a, b) => {
-                const st = a.street.localeCompare(b.street);
-                return st !== 0 ? st : parseInt(a.number) - parseInt(b.number);
-            });
+            fresh.sort(cmpEntries);
             const nowStr = new Date().toLocaleString('he-IL');
             const who = myNickname || myShortId;
             // גיבוי אוטומטי של המצב הקודם — נוסף לרשימת הגיבויים
@@ -684,6 +681,20 @@
     }
     function clearSearch() { document.getElementById('search').value = ''; handleSearch(); }
 
+    // מיון חסין: מתעלם מרווחים כפולים ומתווים בלתי-נראים, ותומך במספרים כמו "10א"
+    function cmpEntries(a, b) {
+        const sa = cleanText(a.street), sb = cleanText(b.street);
+        const s = sa.localeCompare(sb, 'he');
+        if (s !== 0) return s;
+        const na = String(a.number || ''), nb = String(b.number || '');
+        const ia = parseInt(na.replace(/\D/g, ''), 10);
+        const ib = parseInt(nb.replace(/\D/g, ''), 10);
+        const va = isNaN(ia) ? Number.MAX_SAFE_INTEGER : ia;
+        const vb = isNaN(ib) ? Number.MAX_SAFE_INTEGER : ib;
+        if (va !== vb) return va - vb;
+        return na.localeCompare(nb, 'he');
+    }
+
     function render() {
         const q = cleanText(document.getElementById('search').value).toLowerCase();
         const terms = q.split(/\s+/).filter(Boolean);
@@ -695,10 +706,7 @@
                 return alt ? text.includes(alt) : false;
             });
         });
-        filtered.sort((a, b) => {
-            const s = a.street.localeCompare(b.street);
-            return s !== 0 ? s : parseInt(a.number) - parseInt(b.number);
-        });
+        filtered.sort(cmpEntries);
         const list = document.getElementById('list');
         if (!filtered.length) {
             list.innerHTML = '<div class="empty-msg">' + (db.length ? 'לא נמצאו תוצאות' : 'אין נתונים עדיין — יגיעו אוטומטית') + '</div>';
