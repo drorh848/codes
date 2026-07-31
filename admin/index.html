@@ -255,6 +255,7 @@
             <button style="background:#d35400; flex:1; font-size:14px" onclick="restoreCloudBackup()">↩️ שחזור ענן</button>
             <button style="background:#16a085; flex:1; font-size:14px" onclick="openActivityLog()">📋 יומן פעילות</button>
         </div>
+        <button style="background:#2980b9;color:#fff;width:100%;margin-bottom:5px;padding:10px;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer" onclick="cleanupDB()">🧹 ניקוי וסידור המאגר</button>
 
         <!-- SEARCH + MIC -->
         <div class="search-wrapper">
@@ -313,7 +314,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v9'; // לקדם בכל עדכון
+    const APP_VERSION = 'v10'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -824,11 +825,22 @@
         'עשר':'10','עשרה':'10'
     };
 
+    // מיון חסין: מתעלם מרווחים כפולים ומתווים בלתי-נראים, ותומך במספרים כמו "10א"
+    function cmpEntries(a, b) {
+        const sa = cleanText(a.street), sb = cleanText(b.street);
+        const s = sa.localeCompare(sb, 'he');
+        if (s !== 0) return s;
+        const na = String(a.number || ''), nb = String(b.number || '');
+        const ia = parseInt(na.replace(/\D/g, ''), 10);
+        const ib = parseInt(nb.replace(/\D/g, ''), 10);
+        const va = isNaN(ia) ? Number.MAX_SAFE_INTEGER : ia;
+        const vb = isNaN(ib) ? Number.MAX_SAFE_INTEGER : ib;
+        if (va !== vb) return va - vb;
+        return na.localeCompare(nb, 'he');
+    }
+
     function sortDB() {
-        db.sort((a, b) => {
-            const s = a.street.localeCompare(b.street);
-            return s !== 0 ? s : parseInt(a.number) - parseInt(b.number);
-        });
+        db.sort(cmpEntries);
     }
     function handleSearch() {
         const val = document.getElementById('searchBox').value;
@@ -858,7 +870,7 @@
         });
     }
     function handleFormSubmit() {
-        const s = document.getElementById('newStreet').value.trim(), n = document.getElementById('newNum').value.trim(), c = document.getElementById('newCode').value.trim();
+        const s = cleanText(document.getElementById('newStreet').value), n = cleanText(document.getElementById('newNum').value), c = cleanText(document.getElementById('newCode').value);
         if (!s || !c) return alert("חסר מידע");
         if (editingIndex > -1) { db[editingIndex] = {street:s, number:n, code:c}; } else { db.push({street:s, number:n, code:c}); }
         sortDB(); saveToCloud(); renderList(); resetForm();
@@ -956,6 +968,25 @@
                 } else alert('פורמט לא תקין');
             } catch(e) { alert('שגיאה בהדבקה'); }
         };
+    }
+
+    // ניקוי חד-פעמי: מסיר רווחים כפולים/תווים בלתי-נראים מכל הרשומות ומסדר מחדש
+    function cleanupDB() {
+        let changed = 0;
+        db.forEach((it) => {
+            const s = cleanText(it.street), n = cleanText(String(it.number || '')), c = cleanText(it.code);
+            if (s !== it.street || n !== String(it.number || '') || c !== it.code) changed++;
+            it.street = s; it.number = n; it.code = c;
+        });
+        // איתור כפילויות (אותו רחוב+מספר)
+        const seen = {}, dups = [];
+        db.forEach((it) => {
+            const k = it.street + '|' + it.number;
+            if (seen[k]) dups.push(it.street + ' ' + it.number); else seen[k] = 1;
+        });
+        sortDB(); saveToCloud(); renderList();
+        alert('🧹 הושלם!\n' + changed + ' רשומות נוקו וסודרו מחדש.' +
+              (dups.length ? '\n\n⚠️ נמצאו ' + dups.length + ' כפילויות:\n' + dups.slice(0, 10).join('\n') : ''));
     }
 
     // ══════════════════════════════════════════
