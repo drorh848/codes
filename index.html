@@ -201,7 +201,7 @@
     // ══════════════════════════════════════════
     //  גרסת אפליקציה — לקדם בכל עדכון!
     // ══════════════════════════════════════════
-    const APP_VERSION = 'v8';
+    const APP_VERSION = 'v9';
 
     // ══════════════════════════════════════════
     //  Firebase
@@ -681,6 +681,29 @@
     }
     function clearSearch() { document.getElementById('search').value = ''; handleSearch(); }
 
+    // ── חיפוש פונטי: אותיות שנשמעות דומה (גיבוי כשאין תוצאה מדויקת) ──
+    function phonetic(str) {
+        let t = cleanText(str).toLowerCase();
+        t = t.replace(/["'\u05f3\u05f4\-\u2013\u2014]/g, '');       // גרשיים ומקפים
+        // 1) איחוד אותיות שנשמעות זהה
+        t = t.replace(/[\u05d8\u05ea]/g, '\u05d8');                   // ט = ת (קטרוס/קתרוס)
+        t = t.replace(/[\u05db\u05e7\u05da]/g, '\u05db');            // כ = ק (יעקב/יעכב)
+        t = t.replace(/[\u05d1\u05d5]/g, '\u05d1');                   // ב = ו (ויצמן/ביצמן)
+        t = t.replace(/[\u05d0\u05e2\u05d4]/g, '\u05d0');            // א = ע = ה (אליהו/עליהו)
+        t = t.replace(/[\u05dd\u05de]/g, '\u05de');                   // אותיות סופיות
+        t = t.replace(/[\u05df\u05e0]/g, '\u05e0');
+        t = t.replace(/[\u05e3\u05e4]/g, '\u05e4');
+        t = t.replace(/[\u05e5\u05e6]/g, '\u05e6');
+        // 2) אמות קריאה פנימיות — כתיב מלא = כתיב חסר (הרצה חוזרת לרצפים)
+        let prev;
+        do {
+            prev = t;
+            t = t.replace(/(\S)[\u05d1\u05d9\u05d0](?=\S)/g, '$1');  // גוריון=גורין, איינשטיין=אינשטין
+        } while (t !== prev);
+        t = t.replace(/(.)\1+/g, '$1');                               // אותיות כפולות
+        return t.replace(/\s+/g, ' ').trim();
+    }
+
     // מיון חסין: מתעלם מרווחים כפולים ומתווים בלתי-נראים, ותומך במספרים כמו "10א"
     function cmpEntries(a, b) {
         const sa = cleanText(a.street), sb = cleanText(b.street);
@@ -698,7 +721,8 @@
     function render() {
         const q = cleanText(document.getElementById('search').value).toLowerCase();
         const terms = q.split(/\s+/).filter(Boolean);
-        const filtered = db.filter(i => {
+        // שלב 1 — חיפוש מדויק
+        let filtered = db.filter(i => {
             const text = cleanText(i.street + ' ' + i.number).toLowerCase();
             return terms.every(t => {
                 if (text.includes(t)) return true;
@@ -706,13 +730,30 @@
                 return alt ? text.includes(alt) : false;
             });
         });
+        // שלב 2 — אם אין תוצאות, ניסיון פונטי (שגיאות כתיב: קטרוס/קתרוס)
+        let isPhonetic = false;
+        if (!filtered.length && terms.length) {
+            const pTerms = terms.map(phonetic).filter(Boolean);
+            filtered = db.filter(i => {
+                const ptext = phonetic(i.street + ' ' + i.number);
+                return pTerms.every(t => {
+                    if (ptext.includes(t)) return true;
+                    const alt = NUM_WORDS[t];
+                    return alt ? ptext.includes(alt) : false;
+                });
+            });
+            isPhonetic = filtered.length > 0;
+        }
         filtered.sort(cmpEntries);
         const list = document.getElementById('list');
+        const phoneticNote = isPhonetic
+            ? '<div style="background:#fff3cd;color:#856404;border:1px solid #ffeaa7;border-radius:10px;padding:9px;margin-bottom:10px;font-size:13px;text-align:center;font-weight:bold">🔍 לא נמצאה התאמה מדויקת — מוצגות תוצאות דומות</div>'
+            : '';
         if (!filtered.length) {
             list.innerHTML = '<div class="empty-msg">' + (db.length ? 'לא נמצאו תוצאות' : 'אין נתונים עדיין — יגיעו אוטומטית') + '</div>';
             return;
         }
-        list.innerHTML = filtered.map(i => `
+        list.innerHTML = phoneticNote + filtered.map(i => `
             <div class="card">
                 <div>
                     <div class="street-info">${i.street}</div>
