@@ -314,7 +314,7 @@
 
     const ADMIN_UID = 'eFDJ0WAeNjdmSlgKKcg9eWQrfNv2';
     const KEY_PART_A = 'CDkeys!2026#srur';  // חייב להיות זהה לאפליקציית היוזר!
-    const APP_VERSION = 'v10'; // לקדם בכל עדכון
+    const APP_VERSION = 'v11'; // לקדם בכל עדכון
 
     let encKey = null;
     let db = [];
@@ -825,6 +825,29 @@
         'עשר':'10','עשרה':'10'
     };
 
+    // ── חיפוש פונטי: אותיות שנשמעות דומה (גיבוי כשאין תוצאה מדויקת) ──
+    function phonetic(str) {
+        let t = cleanText(str).toLowerCase();
+        t = t.replace(/["'\u05f3\u05f4\-\u2013\u2014]/g, '');       // גרשיים ומקפים
+        // 1) איחוד אותיות שנשמעות זהה
+        t = t.replace(/[\u05d8\u05ea]/g, '\u05d8');                   // ט = ת (קטרוס/קתרוס)
+        t = t.replace(/[\u05db\u05e7\u05da]/g, '\u05db');            // כ = ק (יעקב/יעכב)
+        t = t.replace(/[\u05d1\u05d5]/g, '\u05d1');                   // ב = ו (ויצמן/ביצמן)
+        t = t.replace(/[\u05d0\u05e2\u05d4]/g, '\u05d0');            // א = ע = ה (אליהו/עליהו)
+        t = t.replace(/[\u05dd\u05de]/g, '\u05de');                   // אותיות סופיות
+        t = t.replace(/[\u05df\u05e0]/g, '\u05e0');
+        t = t.replace(/[\u05e3\u05e4]/g, '\u05e4');
+        t = t.replace(/[\u05e5\u05e6]/g, '\u05e6');
+        // 2) אמות קריאה פנימיות — כתיב מלא = כתיב חסר (הרצה חוזרת לרצפים)
+        let prev;
+        do {
+            prev = t;
+            t = t.replace(/(\S)[\u05d1\u05d9\u05d0](?=\S)/g, '$1');  // גוריון=גורין, איינשטיין=אינשטין
+        } while (t !== prev);
+        t = t.replace(/(.)\1+/g, '$1');                               // אותיות כפולות
+        return t.replace(/\s+/g, ' ').trim();
+    }
+
     // מיון חסין: מתעלם מרווחים כפולים ומתווים בלתי-נראים, ותומך במספרים כמו "10א"
     function cmpEntries(a, b) {
         const sa = cleanText(a.street), sb = cleanText(b.street);
@@ -852,15 +875,36 @@
         const container = document.getElementById('listArea'); container.innerHTML = '';
         const q = cleanText(document.getElementById('searchBox').value).toLowerCase();
         const terms = q.split(/\s+/).filter(Boolean);
-        const filtered = db.map((item, index) => ({ ...item, originalIndex: index }))
-            .filter(item => {
-                const text = cleanText(item.street + ' ' + item.number).toLowerCase();
-                return terms.every(t => {
-                    if (text.includes(t)) return true;
+        const indexed = db.map((item, index) => ({ ...item, originalIndex: index }));
+        // שלב 1 — חיפוש מדויק
+        let filtered = indexed.filter(item => {
+            const text = cleanText(item.street + ' ' + item.number).toLowerCase();
+            return terms.every(t => {
+                if (text.includes(t)) return true;
+                const alt = NUM_WORDS[t];
+                return alt ? text.includes(alt) : false;
+            });
+        });
+        // שלב 2 — אם אין תוצאות, ניסיון פונטי
+        let isPhonetic = false;
+        if (!filtered.length && terms.length) {
+            const pTerms = terms.map(phonetic).filter(Boolean);
+            filtered = indexed.filter(item => {
+                const ptext = phonetic(item.street + ' ' + item.number);
+                return pTerms.every(t => {
+                    if (ptext.includes(t)) return true;
                     const alt = NUM_WORDS[t];
-                    return alt ? text.includes(alt) : false;
+                    return alt ? ptext.includes(alt) : false;
                 });
             });
+            isPhonetic = filtered.length > 0;
+        }
+        if (isPhonetic) {
+            const note = document.createElement('div');
+            note.style.cssText = 'background:#fff3cd;color:#856404;border:1px solid #ffeaa7;border-radius:8px;padding:8px;margin-bottom:8px;font-size:13px;text-align:center;font-weight:bold';
+            note.textContent = '🔍 לא נמצאה התאמה מדויקת — מוצגות תוצאות דומות';
+            container.appendChild(note);
+        }
         filtered.forEach(item => {
             const div = document.createElement('div'); div.className = 'card';
             div.innerHTML = `<div><b>${item.street} ${item.number}</b><br><span style="color:#007bff;font-weight:bold">${item.code}</span></div>
